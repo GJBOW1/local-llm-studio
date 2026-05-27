@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Graphify code graph (regenerable) + Claude Code worktrees — keep out of git & the graph
+graphify-out/
+.claude/worktrees/
+
+# Saved diagrams are personal user data, not source. (Vendored libs in
+# static/vendor/ stay committed so the app renders offline out of the box.)
+artifacts/
+
+# Files the model creates/edits via Desktop Commander (user content, not source).
+workspace/
+
+# Local secrets (Brave / OpenWeather / Anthropic / OpenAI / xAI API keys) — NEVER commit.
+config.local.json
+*.local.json
+.env
+*.key
+
+# OS / logs
+.DS_Store
+*.log
+node_modules/

@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Local LLM Studio</title>
+  <!-- Inline SVG favicon (dark-luxury chat bubble) — no extra file, works offline,
+       and stops the browser's /favicon.ico request from 404-ing. -->
+  <link
+    rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230D1117'/><path d='M9 8h14a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-7l-5 4v-4h-2a3 3 0 0 1-3-3v-7a3 3 0 0 1 3-3z' fill='%23D4A853'/></svg>"
+  />
+  <!-- Google Fonts: enhances when online; system fallbacks keep it intentional offline. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;600;700&family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_v }}" />
+  <!-- Where the lifecycle supervisor lives (set when launched via the app). -->
+  <meta name="control-url" content="{{ control_url }}" />
+</head>
+<body>
+  <div class="app">
+    <!-- Saved-conversations sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <button id="newChatSidebar" class="new-chat-btn" title="Start a new conversation">
+        <span class="plus">&#65291;</span> New chat
+      </button>
+      <input
+        id="convoSearch"
+        class="convo-search"
+        type="search"
+        placeholder="Search chats&hellip;"
+        aria-label="Search conversations"
+      />
+      <nav class="convo-list" id="convoList" aria-label="Saved conversations"></nav>
+      <div class="convo-empty" id="convoEmpty">No saved chats yet.</div>
+    </aside>
+
+    <!-- Main column -->
+    <div class="main-col">
+      <!-- Top bar -->
+      <header class="topbar">
+        <div class="brand-row">
+          <button
+            id="sidebarToggle"
+            class="icon-btn"
+            title="Toggle conversations"
+            aria-label="Toggle conversations"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                d="M4 6h16M4 12h16M4 18h16"
+              />
+            </svg>
+          </button>
+          <div class="brand">
+            <h1>Local LLM Studio</h1>
+            <span class="tagline" id="tagline">offline &middot; private &middot; $0</span>
+          </div>
+        </div>
+
+        <div class="controls">
+          <div class="status" id="status" title="Connection to Ollama">
+            <span class="dot" id="statusDot"></span>
+            <span class="status-label" id="statusLabel">checking&hellip;</span>
+          </div>
+
+          <div class="model-wrap">
+            <!-- Hidden native select stays the value source-of-truth; the custom menu
+                 below renders favorites + per-model stars (a native select can't). -->
+            <select id="modelPicker" class="model-picker-hidden" aria-label="Model">
+              <option value="">loading models&hellip;</option>
+            </select>
+            <button id="modelMenuBtn" class="model-menu-btn" type="button" aria-haspopup="listbox" aria-expanded="false">
+              <span id="modelMenuLabel" class="model-menu-cur">loading&hellip;</span>
+              <svg class="mm-chevron" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+                <path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            <div id="modelMenu" class="model-menu hidden" role="listbox" aria-label="Models"></div>
+          </div>
+
+          <button id="newChat" class="ghost-btn" title="Start a new conversation">
+            New chat
+          </button>
+
+          <button
+            id="exportChat"
+            class="icon-btn"
+            title="Export this chat as Markdown"
+            aria-label="Export conversation"
+          >
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+              <path
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M12 3v12m0 0l-4-4m4 4l4-4M5 20h14"
+              />
+            </svg>
+          </button>
+
+          <button
+            id="gallery"
+            class="icon-btn"
+            title="Saved diagrams"
+            aria-label="Saved diagrams"
+          >
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2" />
+              <rect x="14" y="3" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2" />
+              <rect x="3" y="14" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2" />
+              <rect x="14" y="14" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2" />
+            </svg>
+          </button>
+
+          <button
+            id="brainToggle"
+            class="icon-btn"
+            title="Second brain — sources &amp; knowledge graph"
+            aria-label="Second brain"
+          >
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+              <circle cx="6" cy="7" r="2.4" fill="none" stroke="currentColor" stroke-width="2" />
+              <circle cx="18" cy="6" r="2.4" fill="none" stroke="currentColor" stroke-width="2" />
+              <circle cx="13" cy="17.5" r="2.4" fill="none" stroke="currentColor" stroke-width="2" />
+              <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M8 8l7 7.5M15.7 7.2l-2.4 8" />
+            </svg>
+          </button>
+
+          <button
+            id="arenaToggle"
+            class="icon-btn"
+            title="Model Arena — race models side by side"
+            aria-label="Model Arena"
+          >
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+              <rect x="3" y="5" width="4.5" height="14" rx="1" fill="none" stroke="currentColor" stroke-width="2" />
+              <rect x="9.75" y="5" width="4.5" height="14" rx="1" fill="none" stroke="currentColor" stroke-width="2" />
+              <rect x="16.5" y="5" width="4.5" height="14" rx="1" fill="none" stroke="currentColor" stroke-width="2" />
+            </svg>
+          </button>
+
+          <button
+            id="hudToggle"
+            class="icon-btn"
+            title="Telemetry HUD (⌘T)"
+            aria-label="Telemetry HUD"
+          >
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+              <path
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M3 16l4-5 3 3 4-7 4 6 3-2"
+              />
+            </svg>
+          </button>
+
+          <button
+            id="settings"
+            class="icon-btn"
+            title="Settings (server port)"
+            aria-label="Settings"
+          >
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2" />
+              <path
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+              />
+            </svg>
+          </button>
+
+          <button id="quit" class="quit-btn" title="Stop the local server">
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <path
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                d="M12 3v8"
+              />
+              <path
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                d="M6.3 7.3a8 8 0 1 0 11.4 0"
+              />
+            </svg>
+            <span>End</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Transcript -->
+      <main class="transcript" id="transcript">
+      <div class="empty-state" id="emptyState">
+        <div class="empty-mark">&#9671;</div>
+        <h2>A private mind, on your machine.</h2>
+        <p>
+          Every token here is generated locally by Ollama. Nothing leaves this
+          computer. Pick a model and begin.
+        </p>
+      </div>
+    </main>
+
+      <!-- Model Arena (race multiple models on one shared prompt) -->
+      <section class="arena-view hidden" id="arenaView" aria-label="Model Arena">
+        <div class="arena-bar">
+          <div class="arena-bar-left">
+            <button type="button" class="arena-models-toggle" id="arenaModelsToggle" aria-expanded="true" title="Show or hide the model list">
+              <span class="arena-bar-label">Race models</span>
+              <span class="arena-models-count" id="arenaModelsCount"></span>
+              <svg class="arena-chevron" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+                <path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            <div class="arena-models" id="arenaModels"></div>
+          </div>
+          <div class="arena-layout-toggle" role="group" aria-label="Layout">
+            <button type="button" class="arena-layout-btn active" data-layout="grid">Grid</button>
+            <button type="button" class="arena-layout-btn" data-layout="tabs">Tabs</button>
+          </div>
+          <button type="button" class="arena-doc-toggle" id="arenaDocToggle" title="Shared live document">📄 Doc</button>
+          <button type="button" class="arena-doc-toggle" id="arenaCrossBtn" title="Share each model's answer with the others, then have them reconsider">🔁 Cross-pollinate</button>
+        </div>
+        <div class="arena-prompt hidden" id="arenaPrompt">
+          <div class="arena-prompt-label">Shared prompt &middot; <span id="arenaPromptCount">0</span> models</div>
+          <div class="arena-prompt-text" id="arenaPromptText"></div>
+        </div>
+        <div class="arena-tabs hidden" id="arenaTabs"></div>
+        <div class="arena-body">
+          <div class="arena-grid" id="arenaGrid">
+            <div class="arena-empty">
+              Pick 2&ndash;4 models above, type a prompt below, and broadcast it to race
+              them side by side.
+            </div>
+          </div>
+          <aside class="doc-panel hidden" id="docPanel" aria-label="Shared document">
+            <div class="doc-head">
+              <span class="doc-title" id="docTitle">No document open</span>
+              <span class="doc-pen" id="docPen"></span>
+              <button class="doc-close" id="docClose" type="button" title="Close document">&times;</button>
+            </div>
+            <div class="doc-open-row" id="docOpenRow">
+              <button class="btn-primary" id="docBrowseBtn" type="button">Browse&hellip;</button>
+            </div>
+            <div class="doc-view" id="docView">
+              <p class="doc-hint"><b>Browse</b> to open any file on your computer. Text files (Markdown, code, configs…) can be read by every racing model and edited live by the rainbow-selected pen-holder; images, PDFs, and video preview inline.</p>
+            </div>
+            <textarea class="doc-edit hidden" id="docEdit" spellcheck="false"></textarea>
+            <div class="doc-actions hidden" id="docActions">
+              <button class="ghost-btn" id="docTakePen" type="button">✒ Take the pen</button>
+              <button class="btn-primary hidden" id="docSave" type="button">Save</button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- Composer -->
+      <footer class="composer">
+        <div class="composer-inner">
+          <div class="options-row">
+            <div class="options-left">
+              <label class="temp-control" title="Higher = more creative, lower = more focused">
+                <span>Temperature</span>
+                <input type="range" id="tempSlider" min="0" max="2" step="0.1" value="0.7" />
+                <span class="temp-value" id="tempValue">0.7</span>
+              </label>
+              <div
+                class="cap-badges"
+                id="capBadges"
+                title="What the selected model can do"
+                aria-label="Model capabilities"
+              ></div>
+              <button
+                id="voiceToggle"
+                class="voice-toggle"
+                type="button"
+                title="Hands-free voice conversation: speak your turn, hear the reply, auto-listen for the next"
+                aria-pressed="false"
+              >🎧 Voice</button>
+            </div>
+            <div class="options-meters">
+              <span class="tps" id="tpsReadout"></span>
+              <span class="ctx-meter" id="ctxMeter" title="Context window used in this chat (from the model's token counts)">
+                <span class="ctx-track"><span class="ctx-fill" id="ctxFill"></span></span>
+                <span class="ctx-label" id="ctxLabel"></span>
+              </span>
+            </div>
+          </div>
+          <div class="cmd-palette hidden" id="cmdPalette" role="listbox" aria-label="Commands"></div>
+          <div class="attach-strip hidden" id="attachStrip" aria-label="Attachments"></div>
+          <div class="input-bar">
+            <button
+              id="attach"
+              class="attach-btn"
+              title="Attach images, PDF, PowerPoint, Word, or text"
+              aria-label="Attach files"
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M21.4 11.05 12.25 20.2a5.5 5.5 0 0 1-7.78-7.78l9.2-9.2a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.49"
+                />
+              </svg>
+            </button>
+            <input
+              type="file"
+              id="fileInput"
+              multiple
+              hidden
+              accept="image/*,.pdf,.pptx,.docx,.txt,.md,.markdown,.csv,.tsv,.json,.log,.rtf,.py,.js,.ts,.html,.css,.yaml,.yml,.xml"
+            />
+            <button id="micBtn" class="mic-btn" type="button" title="Tap to talk — auto-stops on silence, then transcribes and sends" aria-label="Voice input">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" />
+                <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 11a6 6 0 0 0 12 0M12 17v3" />
+              </svg>
+            </button>
+            <textarea
+              id="input"
+              class="input"
+              rows="1"
+              placeholder="Send a message&hellip;  (Enter to send, Shift+Enter for newline)"
+              autofocus
+            ></textarea>
+            <button id="send" class="send-btn" title="Send">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path fill="currentColor" d="M3.4 20.4 21 12 3.4 3.6 3.39 10.2 15 12l-11.61 1.8z" />
+              </svg>
+            </button>
+            <button id="stop" class="stop-btn hidden" title="Stop generating">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </footer>
+    </div>
+
+    <!-- Second-Brain / RAG Explorer panel -->
+    <aside class="brain-panel hidden" id="brainPanel" aria-label="Second brain">
+      <div class="brain-head">
+        <span class="brain-title">&#10022; Second brain</span>
+        <button id="brainClose" class="brain-close icon-btn" title="Close (Esc)" aria-label="Close">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
+
+      <section class="brain-section">
+        <div class="brain-section-head">Index health</div>
+        <div class="brain-health">
+          <div class="bh-row"><span>Status</span><span class="bh-val" id="bhStatus">&hellip;</span></div>
+          <div class="bh-row"><span>Embedding model</span><span class="bh-val" id="bhModel">&mdash;</span></div>
+          <div class="bh-row"><span>Notes indexed</span><span class="bh-val" id="bhNotes">&mdash;</span></div>
+          <div class="bh-row"><span>Last reindex</span><span class="bh-val" id="bhReindex">&mdash;</span></div>
+        </div>
+      </section>
+
+      <section class="brain-section">
+        <div class="brain-section-head">
+          Sources retrieved <span class="brain-meta" id="brainRagMeta"></span>
+        </div>
+        <div class="brain-sources" id="brainSources">
+          <div class="brain-empty">Ask something &mdash; the notes that grounded the answer appear here.</div>
+        </div>
+      </section>
+
+      <section class="brain-section brain-graph-section">
+        <div class="brain-section-head">
+          Knowledge graph <span class="brain-meta" id="brainGraphMeta"></span>
+        </div>
+        <div class="brain-graph-wrap">
+          <svg class="brain-graph" id="brainGraph" aria-label="Knowledge graph"></svg>
+          <div class="brain-graph-tip" id="brainGraphTip"></div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- Settings modal -->
+  <div class="modal-backdrop hidden" id="settingsModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <h2 id="settingsTitle">Settings</h2>
+
+      <div class="settings-section">
+        <h3 class="settings-heading">Appearance</h3>
+        <label class="field">
+          <span>Theme</span>
+          <select id="themeSelect" class="settings-select">
+            <option value="dark-luxury">Navy (default)</option>
+            <option value="midnight">Midnight</option>
+            <option value="paper">Paper (Light)</option>
+            <option value="contrast">High Contrast</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Text &amp; UI size — <span id="fontSizeValue">100%</span></span>
+          <input type="range" id="fontSizeRange" min="80" max="150" step="5" value="100" />
+        </label>
+        <p class="field-hint">Theme and size apply instantly and are remembered.</p>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="settings-heading">Cloud models</h3>
+        <p class="field-hint" style="margin-top: 0">
+          Connect Claude (Anthropic) or GPT (OpenAI) with your own API key. Cloud
+          models send your prompts &mdash; including second-brain context &mdash; over
+          the internet and cost money; local models stay 100% offline. Keys are stored
+          only on this machine (never committed).
+        </p>
+
+        <div class="cloud-provider" data-provider="anthropic">
+          <div class="cloud-provider-row">
+            <span class="cloud-provider-name">Anthropic <span class="cloud-tag">Claude · Opus</span></span>
+            <span class="cloud-status" id="anthropicStatus">checking&hellip;</span>
+          </div>
+          <div class="cloud-connect">
+            <input
+              type="password"
+              class="settings-input cloud-key"
+              id="anthropicKey"
+              placeholder="sk-ant-&hellip;"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button class="btn-primary cloud-connect-btn" type="button" data-provider="anthropic">
+              Connect
+            </button>
+          </div>
+          <a class="field-hint cloud-link" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">Get an Anthropic API key &rarr;</a>
+        </div>
+
+        <div class="cloud-provider" data-provider="openai">
+          <div class="cloud-provider-row">
+            <span class="cloud-provider-name">OpenAI <span class="cloud-tag">GPT</span></span>
+            <span class="cloud-status" id="openaiStatus">checking&hellip;</span>
+          </div>
+          <div class="cloud-connect">
+            <input
+              type="password"
+              class="settings-input cloud-key"
+              id="openaiKey"
+              placeholder="sk-&hellip;"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button class="btn-primary cloud-connect-btn" type="button" data-provider="openai">
+              Connect
+            </button>
+          </div>
+          <a class="field-hint cloud-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">Get an OpenAI API key &rarr;</a>
+        </div>
+
+        <div class="cloud-provider" data-provider="gemini">
+          <div class="cloud-provider-row">
+            <span class="cloud-provider-name">Google <span class="cloud-tag">Gemini</span></span>
+            <span class="cloud-status" id="geminiStatus">checking&hellip;</span>
+          </div>
+          <div class="cloud-connect">
+            <input
+              type="password"
+              class="settings-input cloud-key"
+              id="geminiKey"
+              placeholder="AIza&hellip;"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button class="btn-primary cloud-connect-btn" type="button" data-provider="gemini">
+              Connect
+            </button>
+          </div>
+          <a class="field-hint cloud-link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Get a Gemini API key &rarr;</a>
+        </div>
+
+        <div class="cloud-provider" data-provider="grok">
+          <div class="cloud-provider-row">
+            <span class="cloud-provider-name">xAI <span class="cloud-tag">Grok</span></span>
+            <span class="cloud-status" id="grokStatus">checking&hellip;</span>
+          </div>
+          <div class="cloud-connect">
+            <input
+              type="password"
+              class="settings-input cloud-key"
+              id="grokKey"
+              placeholder="xai-&hellip;"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button class="btn-primary cloud-connect-btn" type="button" data-provider="grok">
+              Connect
+            </button>
+          </div>
+          <a class="field-hint cloud-link" href="https://console.x.ai" target="_blank" rel="noopener noreferrer">Get an xAI (Grok) API key &rarr;</a>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="settings-heading">Server</h3>
+        <label class="field">
+          <span>Server port</span>
+          <input type="number" id="portInput" min="1024" max="65535" inputmode="numeric" />
+        </label>
+        <p class="field-hint">
+          Applying a new port restarts the server and reloads the app there.
+          Use a free port (1024&ndash;65535) if 5050 is taken by another app.
+        </p>
+      </div>
+
+      <div class="modal-actions">
+        <button class="ghost-btn" id="settingsCancel" type="button">Close</button>
+        <button class="btn-primary" id="settingsApply" type="button">Apply &amp; restart</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Saved-diagrams gallery -->
+  <div class="modal-backdrop hidden" id="galleryModal">
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="galleryTitle">
+      <div class="modal-head">
+        <h2 id="galleryTitle">Saved diagrams</h2>
+        <button class="icon-btn" id="galleryClose" type="button" title="Close" aria-label="Close">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
+      <div class="gallery-preview hidden" id="galleryPreview"></div>
+      <div class="gallery-list" id="galleryList"></div>
+    </div>
+  </div>
+
+  <!-- Note preview — click a knowledge-graph node to open its source .md -->
+  <div class="modal-backdrop hidden" id="notePreview">
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="noteTitle">
+      <div class="modal-head">
+        <h2 id="noteTitle">Note</h2>
+        <button class="icon-btn" id="noteClose" type="button" title="Close (Esc)" aria-label="Close">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
+      <div class="note-body bubble" id="noteBody"></div>
+    </div>
+  </div>
+
+  <!-- Telemetry HUD — slide-in right rail (toggle: ⌘T or the topbar chart icon) -->
+  <aside class="hud hidden" id="hudPanel" aria-label="Live telemetry">
+    <div class="hud-head">
+      <span class="hud-title">Live telemetry</span>
+      <div class="hud-head-right">
+        <span class="hud-kbd">⌘T</span>
+        <button id="hudClose" class="hud-close icon-btn" title="Close (Esc)" aria-label="Close">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="hud-card hud-tps-card">
+      <div class="hud-card-label">TOKENS / SEC</div>
+      <div class="hud-tps" id="hudTps">—<span>t/s</span></div>
+      <svg class="hud-spark" id="hudSpark" viewBox="0 0 200 40" preserveAspectRatio="none" aria-hidden="true"></svg>
+    </div>
+    <div class="hud-card">
+      <div class="hud-row">
+        <div class="hud-card-label">CONTEXT BUDGET</div>
+        <span class="hud-mono" id="hudCtxText">— / —</span>
+      </div>
+      <div class="hud-bar"><div class="hud-bar-fill" id="hudCtxFill"></div></div>
+    </div>
+    <div class="hud-card">
+      <div class="hud-row">
+        <div class="hud-card-label">GPU / VRAM OFFLOAD</div>
+        <span class="hud-mono" id="hudGpuText">idle</span>
+      </div>
+      <div class="hud-layers" id="hudLayers"></div>
+      <div class="hud-model" id="hudModel"></div>
+    </div>
+    <p class="hud-note">Live, on-device metrics. GPU-util %, temp &amp; power need privileged access, so they're omitted rather than estimated.</p>
+  </aside>
+
+  <!-- Mermaid + Chart.js vendored locally so diagrams/charts render with zero internet. -->
+  <script src="{{ url_for('static', filename='vendor/mermaid.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='vendor/highlight-mini.js') }}?v={{ asset_v }}"></script>
+  <script src="{{ url_for('static', filename='markdown.js') }}?v={{ asset_v }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_v }}"></script>
+</body>
+</html>
