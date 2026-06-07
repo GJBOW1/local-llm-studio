@@ -318,6 +318,10 @@ def _native_tool_schemas() -> list[dict[str, Any]]:
                 "location": {"type": "string", "description": "city, e.g. 'Williamsburg, VA'"}},
                 "required": ["location"]},
         }})
+    # Agentic file CRUD (Phase 6) — only offered when the user has turned on
+    # "Agent edits". Every change is journaled and undoable (see _crud_* below).
+    if AGENT_WRITES_ENABLED:
+        schemas += _CRUD_TOOL_SCHEMAS
     return schemas
 
 
@@ -2197,7 +2201,7 @@ PROJECT_ROOT: str = os.path.realpath(os.path.expanduser(
 os.makedirs(PROJECT_ROOT, exist_ok=True)
 
 _FS_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache",
-                 ".pytest_cache", "graphify-out", "dist", "build"}
+                 ".pytest_cache", "graphify-out", "dist", "build", ".lls-agent"}
 _FS_TREE_CAP = 4000        # max entries from /api/fs/tree
 _FS_READ_CAP = 200_000     # max bytes from /api/fs/read
 _FS_SEARCH_CAP = 50        # max hits from /api/fs/search
@@ -2315,6 +2319,293 @@ def api_fs_search() -> Response:
                 if len(hits) >= _FS_SEARCH_CAP:
                     return jsonify({"hits": sorted(hits)[:_FS_SEARCH_CAP], "truncated": True})
     return jsonify({"hits": sorted(hits), "truncated": False})
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Agentic file CRUD + change journal (Phase 6, slice 3) — lets a model create,
+# update, move, and delete files/folders in the project. SAFE BY DESIGN:
+#   • OFF by default (AGENT_WRITES_ENABLED) — the tools aren't even shown to the
+#     model until the user turns on "Agent edits".
+#   • Path-jailed to the project root (reuses _project_path).
+#   • EVERY change is journaled and reversible: updates keep a checkpoint copy,
+#     deletes move to a project trash — nothing is hard-erased, so any change the
+#     model makes can be undone.
+# One core serves both the model tools (every provider, via _dispatch_tool) and
+# the /api/fs/* HTTP endpoints the UI calls, so behavior is identical everywhere.
+# ─────────────────────────────────────────────────────────────────────────
+import shutil
+import uuid
+
+AGENT_WRITES_ENABLED: bool = False
+_AGENT_LOCK = threading.Lock()
+
+
+def _agent_dir() -> str:
+    d = os.path.join(os.path.realpath(PROJECT_ROOT), ".lls-agent")
+    os.makedirs(os.path.join(d, "checkpoints"), exist_ok=True)
+    os.makedirs(os.path.join(d, "trash"), exist_ok=True)
+    return d
+
+
+def _journal_load() -> list[dict[str, Any]]:
+    try:
+        with open(os.path.join(_agent_dir(), "journal.json"), encoding="utf-8") as fh:
+            data = json.load(fh)
+            return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _journal_save(entries: list[dict[str, Any]]) -> None:
+    try:
+        with open(os.path.join(_agent_dir(), "journal.json"), "w", encoding="utf-8") as fh:
+            json.dump(entries, fh, indent=2)
+    except OSError:
+        pass
+
+
+def _journal_add(entry: dict[str, Any]) -> None:
+    with _AGENT_LOCK:
+        entries = _journal_load()
+        seq = 0
+        for e in entries:
+            try:
+                seq = max(seq, int(str(e.get("id", "c0"))[1:]))
+            except ValueError:
+                pass
+        entries.append({"id": f"c{seq + 1}", "undone": False,
+                        "ts": datetime.now().astimezone().isoformat(timespec="seconds"), **entry})
+        _journal_save(entries)
+
+
+def _checkpoint_copy(p: str) -> str:
+    name = uuid.uuid4().hex[:12] + "__" + os.path.basename(p)
+    shutil.copy2(p, os.path.join(_agent_dir(), "checkpoints", name))
+    return name
+
+
+def _writes_guard() -> "str | None":
+    if not AGENT_WRITES_ENABLED:
+        return ("File edits are disabled. Ask the user to turn on 'Agent edits' in the "
+                "Files panel before trying to create, change, move, or delete files.")
+    return None
+
+
+def _crud_write(args: dict[str, Any]) -> str:
+    guard = _writes_guard()
+    if guard:
+        return guard
+    rel = str(args.get("path") or "").strip()
+    content = args.get("content")
+    content = "" if content is None else str(content)
+    p = _project_path(rel)
+    if not p or p == os.path.realpath(PROJECT_ROOT):
+        return f"Refused: '{rel}' is outside the project or invalid."
+    existed = os.path.isfile(p)
+    backup = _checkpoint_copy(p) if existed else None
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(content)
+    except OSError as exc:
+        return f"Write failed: {exc}"
+    _journal_add({"op": "update" if existed else "create", "path": rel, "backup": backup})
+    return f"{'Updated' if existed else 'Created'} {rel} ({len(content)} chars)."
+
+
+def _crud_mkdir(args: dict[str, Any]) -> str:
+    guard = _writes_guard()
+    if guard:
+        return guard
+    rel = str(args.get("path") or "").strip()
+    p = _project_path(rel)
+    if not p or p == os.path.realpath(PROJECT_ROOT):
+        return f"Refused: invalid path '{rel}'."
+    if os.path.exists(p):
+        return f"'{rel}' already exists."
+    try:
+        os.makedirs(p)
+    except OSError as exc:
+        return f"Create-folder failed: {exc}"
+    _journal_add({"op": "mkdir", "path": rel})
+    return f"Created folder {rel}."
+
+
+def _crud_move(args: dict[str, Any]) -> str:
+    guard = _writes_guard()
+    if guard:
+        return guard
+    src = str(args.get("from") or args.get("src") or "").strip()
+    dst = str(args.get("to") or args.get("dest") or "").strip()
+    ps, pd = _project_path(src), _project_path(dst)
+    root = os.path.realpath(PROJECT_ROOT)
+    if not ps or ps == root or not os.path.exists(ps):
+        return f"Refused: source '{src}' is missing or invalid."
+    if not pd or pd == root:
+        return f"Refused: destination '{dst}' is invalid."
+    if os.path.exists(pd):
+        return f"Refused: '{dst}' already exists."
+    try:
+        os.makedirs(os.path.dirname(pd), exist_ok=True)
+        os.rename(ps, pd)
+    except OSError as exc:
+        return f"Move failed: {exc}"
+    _journal_add({"op": "move", "path": src, "to": dst})
+    return f"Moved {src} → {dst}."
+
+
+def _crud_delete(args: dict[str, Any]) -> str:
+    guard = _writes_guard()
+    if guard:
+        return guard
+    rel = str(args.get("path") or "").strip()
+    p = _project_path(rel)
+    root = os.path.realpath(PROJECT_ROOT)
+    if not p or p == root or not os.path.exists(p):
+        return f"Refused: '{rel}' is missing or invalid."
+    trashname = uuid.uuid4().hex[:12] + "__" + os.path.basename(p.rstrip(os.sep))
+    try:
+        shutil.move(p, os.path.join(_agent_dir(), "trash", trashname))
+    except OSError as exc:
+        return f"Delete failed: {exc}"
+    _journal_add({"op": "delete", "path": rel, "trash": trashname})
+    return f"Deleted {rel} (moved to the project trash — recoverable via Undo)."
+
+
+def _crud_undo(change_id: "str | None" = None) -> str:
+    with _AGENT_LOCK:
+        entries = _journal_load()
+        target = None
+        for e in reversed(entries):
+            if e.get("undone"):
+                continue
+            if change_id is None or e.get("id") == change_id:
+                target = e
+                break
+        if not target:
+            return "Nothing to undo."
+        op, rel, root = target.get("op"), target.get("path"), os.path.realpath(PROJECT_ROOT)
+        try:
+            if op == "create":
+                p = _project_path(rel)
+                if p and os.path.isfile(p):
+                    os.remove(p)
+            elif op == "update":
+                p, bk = _project_path(rel), target.get("backup")
+                src = os.path.join(_agent_dir(), "checkpoints", bk) if bk else None
+                if p and src and os.path.isfile(src):
+                    shutil.copy2(src, p)
+            elif op == "mkdir":
+                p = _project_path(rel)
+                if p and os.path.isdir(p):
+                    try:
+                        os.rmdir(p)
+                    except OSError:
+                        pass
+            elif op == "move":
+                ps, pd = _project_path(rel), _project_path(target.get("to"))
+                if ps and pd and os.path.exists(pd) and not os.path.exists(ps):
+                    os.makedirs(os.path.dirname(ps), exist_ok=True)
+                    os.rename(pd, ps)
+            elif op == "delete":
+                p, tn = _project_path(rel), target.get("trash")
+                src = os.path.join(_agent_dir(), "trash", tn) if tn else None
+                if p and src and os.path.exists(src) and not os.path.exists(p):
+                    os.makedirs(os.path.dirname(p), exist_ok=True)
+                    shutil.move(src, p)
+        except OSError as exc:
+            return f"Undo failed: {exc}"
+        target["undone"] = True
+        _journal_save(entries)
+    return f"Undid {op} on {rel}."
+
+
+# Tools the model can call (only listed when AGENT_WRITES_ENABLED). Registered in
+# NATIVE_TOOLS so _dispatch_tool routes them for EVERY provider.
+NATIVE_TOOLS["project_write"] = _crud_write
+NATIVE_TOOLS["project_create_folder"] = _crud_mkdir
+NATIVE_TOOLS["project_move"] = _crud_move
+NATIVE_TOOLS["project_delete"] = _crud_delete
+
+_CRUD_TOOL_SCHEMAS: list[dict[str, Any]] = [
+    {"type": "function", "function": {
+        "name": "project_write",
+        "description": "Create a new file OR overwrite an existing one inside the project, "
+                       "with the given full content. The change is journaled and undoable.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "project-relative path, e.g. 'src/app.py'"},
+            "content": {"type": "string", "description": "the FULL new file content"}},
+            "required": ["path", "content"]}}},
+    {"type": "function", "function": {
+        "name": "project_create_folder",
+        "description": "Create a new folder (and any parents) inside the project. Journaled/undoable.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "project-relative folder path"}},
+            "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "project_move",
+        "description": "Move or rename a file/folder within the project. Journaled/undoable.",
+        "parameters": {"type": "object", "properties": {
+            "from": {"type": "string", "description": "current project-relative path"},
+            "to": {"type": "string", "description": "new project-relative path"}},
+            "required": ["from", "to"]}}},
+    {"type": "function", "function": {
+        "name": "project_delete",
+        "description": "Delete a file/folder in the project. It is moved to the project trash "
+                       "(never hard-deleted), so it can be restored via Undo.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "project-relative path to delete"}},
+            "required": ["path"]}}},
+]
+
+
+@app.get("/api/agent/writes")
+def api_agent_writes_get() -> Response:
+    return jsonify({"enabled": AGENT_WRITES_ENABLED})
+
+
+@app.post("/api/agent/writes")
+def api_agent_writes_set() -> Response:
+    """Turn agent file edits on/off (off by default)."""
+    global AGENT_WRITES_ENABLED
+    data = request.get_json(silent=True) or {}
+    AGENT_WRITES_ENABLED = bool(data.get("enabled"))
+    return jsonify({"enabled": AGENT_WRITES_ENABLED})
+
+
+@app.get("/api/fs/changes")
+def api_fs_changes() -> Response:
+    """The change journal (most recent first)."""
+    return jsonify({"changes": list(reversed(_journal_load())), "enabled": AGENT_WRITES_ENABLED})
+
+
+@app.post("/api/fs/undo")
+def api_fs_undo() -> Response:
+    """Undo a journaled change (the most recent, or a specific id)."""
+    data = request.get_json(silent=True) or {}
+    msg = _crud_undo(str(data["id"]) if data.get("id") else None)
+    return jsonify({"message": msg})
+
+
+# Direct (UI-driven) mutation endpoints — same core, gated the same way.
+@app.post("/api/fs/write")
+def api_fs_write() -> Response:
+    return jsonify({"message": _crud_write(request.get_json(silent=True) or {})})
+
+
+@app.post("/api/fs/mkdir")
+def api_fs_mkdir() -> Response:
+    return jsonify({"message": _crud_mkdir(request.get_json(silent=True) or {})})
+
+
+@app.post("/api/fs/move")
+def api_fs_move() -> Response:
+    return jsonify({"message": _crud_move(request.get_json(silent=True) or {})})
+
+
+@app.post("/api/fs/delete")
+def api_fs_delete() -> Response:
+    return jsonify({"message": _crud_delete(request.get_json(silent=True) or {})})
 
 
 if __name__ == "__main__":

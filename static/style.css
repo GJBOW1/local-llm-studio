@@ -3232,3 +3232,84 @@ video.gen-media-el {
   padding: 0 4px;
   border-radius: 3px;
 }
+.agent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--hair);
+}
+.agent-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.agent-state {
+  font-size: 11px;
+  color: var(--muted);
+}
+.agent-state.on {
+  color: var(--green);
+  font-weight: 600;
+}
+.files-changes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border-top: 1px solid var(--hair);
+}
+.files-changes-head .ghost-btn {
+  padding: 0 6px;
+  font-size: 14px;
+}
+.files-changes {
+  max-height: 32%;
+  overflow: auto;
+  padding: 4px 0 8px;
+}
+.change-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+}
+.change-row.undone .change-label {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+.change-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.change-undo {
+  flex: 0 0 auto;
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--hair);
+  background: transparent;
+  color: var(--gold);
+  cursor: pointer;
+}
+.change-undo:hover {
+  background: var(--gold-soft);
+}
+.change-undone-tag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--muted);
+}

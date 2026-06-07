@@ -386,6 +386,15 @@
       </div>
       <div class="files-tree" id="filesTree" aria-label="File tree"></div>
       <div class="files-hint">Click a file to attach it to your next message, or type <kbd>@</kbd> in the composer to search files.</div>
+      <div class="agent-row">
+        <label class="agent-toggle" title="Let the model create, edit, move, and delete files in this project. Every change is journaled and can be undone.">
+          <input type="checkbox" id="agentWritesToggle" />
+          <span>&#9999;&#65039; Agent edits</span>
+        </label>
+        <span class="agent-state" id="agentWritesState">off</span>
+      </div>
+      <div class="files-changes-head">Changes <button id="changesRefresh" class="ghost-btn" type="button" title="Refresh">&#8635;</button></div>
+      <div class="files-changes" id="filesChanges" aria-label="Changes"><div class="files-hint">No changes yet.</div></div>
     </aside>
 
     <!-- Second-Brain / RAG Explorer panel -->

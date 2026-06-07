@@ -197,6 +197,10 @@
     filesTree: document.getElementById("filesTree"),
     filesRoot: document.getElementById("filesRoot"),
     filePalette: document.getElementById("filePalette"),
+    agentWritesToggle: document.getElementById("agentWritesToggle"),
+    agentWritesState: document.getElementById("agentWritesState"),
+    filesChanges: document.getElementById("filesChanges"),
+    changesRefresh: document.getElementById("changesRefresh"),
   });
 
   // Per-model capability cache (thinking + context window), filled once per model
@@ -1680,6 +1684,8 @@
     el.filesPanel.classList.remove("hidden");
     el.filesToggle.classList.add("brain-active");
     if (!fsTreeLoaded) loadFileTree();
+    loadAgentState();
+    loadChanges();
   }
   function closeFilesPanel() {
     el.filesPanel.classList.add("hidden");
@@ -1713,6 +1719,103 @@
       toast("Could not set folder.");
     }
   });
+
+  // -- Agent edits toggle + change journal (CRUD, every change undoable) --
+  async function loadAgentState() {
+    try {
+      const d = await fetch("/api/agent/writes").then((r) => r.json());
+      el.agentWritesToggle.checked = !!d.enabled;
+      el.agentWritesState.textContent = d.enabled ? "ON — model can edit files" : "off";
+      el.agentWritesState.classList.toggle("on", !!d.enabled);
+    } catch (_) {}
+  }
+  el.agentWritesToggle?.addEventListener("change", async () => {
+    const enabled = el.agentWritesToggle.checked;
+    try {
+      const d = await fetch("/api/agent/writes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      }).then((r) => r.json());
+      el.agentWritesState.textContent = d.enabled ? "ON — model can edit files" : "off";
+      el.agentWritesState.classList.toggle("on", !!d.enabled);
+      toast(d.enabled ? "Agent edits enabled — every change is undoable." : "Agent edits disabled.");
+    } catch (_) {
+      toast("Could not change the setting.");
+    }
+  });
+
+  async function loadChanges() {
+    try {
+      const d = await fetch("/api/fs/changes").then((r) => r.json());
+      renderChanges(d.changes || []);
+    } catch (_) {}
+  }
+  function renderChanges(changes) {
+    el.filesChanges.replaceChildren();
+    if (!changes.length) {
+      const empty = document.createElement("div");
+      empty.className = "files-hint";
+      empty.textContent = "No changes yet.";
+      el.filesChanges.appendChild(empty);
+      return;
+    }
+    const verbs = { create: "＋", update: "✎", mkdir: "📁＋", move: "→", delete: "🗑" };
+    for (const c of changes) {
+      const row = document.createElement("div");
+      row.className = "change-row" + (c.undone ? " undone" : "");
+      const label = document.createElement("span");
+      label.className = "change-label";
+      label.textContent = (verbs[c.op] || c.op) + " " + c.path + (c.to ? " → " + c.to : "");
+      label.title = (c.ts || "") + " · " + c.op;
+      row.appendChild(label);
+      if (c.undone) {
+        const tag = document.createElement("span");
+        tag.className = "change-undone-tag";
+        tag.textContent = "undone";
+        row.appendChild(tag);
+      } else {
+        const btn = document.createElement("button");
+        btn.className = "change-undo";
+        btn.type = "button";
+        btn.textContent = "Undo";
+        btn.dataset.id = c.id;
+        row.appendChild(btn);
+      }
+      el.filesChanges.appendChild(row);
+    }
+  }
+  el.filesChanges?.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".change-undo[data-id]");
+    if (!btn) return;
+    try {
+      const d = await fetch("/api/fs/undo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: btn.dataset.id }),
+      }).then((r) => r.json());
+      toast(d.message || "Undone.");
+      loadChanges();
+      fsTreeLoaded = false;
+      loadFileTree();
+    } catch (_) {
+      toast("Undo failed.");
+    }
+  });
+  el.changesRefresh?.addEventListener("click", loadChanges);
+
+  // When the model runs a CRUD tool mid-stream, refresh the tree + journal so the
+  // user watches changes land live.
+  function onAgentToolEvent(name) {
+    if (typeof name === "string" && name.indexOf("project_") === 0) {
+      if (!el.filesPanel.classList.contains("hidden")) {
+        fsTreeLoaded = false;
+        loadFileTree();
+        loadChanges();
+      }
+    }
+  }
+  window.__llsOnAgentToolEvent = onAgentToolEvent;
 
   // -- @file autocomplete: its own palette; the "/" command palette is untouched --
   function filePaletteOpen() {
@@ -3149,6 +3252,7 @@
           }
           if (obj.tool_event) {
             showToolChip(assistantBody, obj.tool_event);
+            onAgentToolEvent(obj.tool_event.name); // refresh tree/journal on a project_* edit
             continue; // tool-call metadata, no message payload
           }
           if (obj.media) {
