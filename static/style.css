@@ -3159,3 +3159,76 @@ video.gen-media-el {
     opacity: 1;
   }
 }
+
+/* ---- Project files panel + @file mentions (Phase 6) ---- */
+.files-panel {
+  width: 300px;
+  flex: 0 0 300px;
+  background: var(--panel);
+  border-left: 1px solid var(--hair);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.files-panel.hidden {
+  display: none;
+}
+.files-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--hair);
+}
+.files-title {
+  font-weight: 600;
+  color: var(--strong);
+  font-size: 13px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.files-change {
+  font-size: 11px;
+  padding: 3px 8px;
+}
+.files-tree {
+  flex: 1;
+  overflow: auto;
+  padding: 6px 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  min-height: 0;
+}
+.file-row {
+  padding: 3px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  border-radius: 4px;
+}
+.file-row.file-file {
+  cursor: pointer;
+}
+.file-row.file-file:hover {
+  background: var(--gold-soft);
+  color: var(--strong);
+}
+.file-row.file-dir {
+  color: var(--muted);
+}
+.files-hint {
+  padding: 8px 14px;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid var(--hair);
+  line-height: 1.4;
+}
+.files-hint kbd {
+  font-family: var(--mono);
+  background: var(--gold-soft);
+  padding: 0 4px;
+  border-radius: 3px;
+}

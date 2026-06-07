@@ -188,6 +188,17 @@
     ctxLabel: document.getElementById("ctxLabel"),
   };
 
+  // Phase 6 slice 2 — project files panel + @file mentions.
+  Object.assign(el, {
+    filesToggle: document.getElementById("filesToggle"),
+    filesPanel: document.getElementById("filesPanel"),
+    filesClose: document.getElementById("filesClose"),
+    filesChange: document.getElementById("filesChange"),
+    filesTree: document.getElementById("filesTree"),
+    filesRoot: document.getElementById("filesRoot"),
+    filePalette: document.getElementById("filePalette"),
+  });
+
   // Per-model capability cache (thinking + context window), filled once per model
   // from /api/capabilities so the UI auto-enables reasoning and sizes the context meter.
   const capCache = {}; // model -> {thinking, window}
@@ -656,6 +667,8 @@
   ];
   let cmdMatches = [];
   let cmdActive = 0;
+  let fileMatches = []; // @file autocomplete hits (rel paths)
+  let fileActive = 0;
 
   function paletteOpen() {
     return !el.cmdPalette.classList.contains("hidden");
@@ -719,6 +732,30 @@
   });
 
   el.input.addEventListener("keydown", (e) => {
+    if (filePaletteOpen()) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        fileActive = (fileActive + 1) % fileMatches.length;
+        renderFilePalette();
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        fileActive = (fileActive - 1 + fileMatches.length) % fileMatches.length;
+        renderFilePalette();
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        applyFile(fileMatches[fileActive]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        hideFilePalette();
+        return;
+      }
+    }
     if (paletteOpen()) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -1576,6 +1613,161 @@
   function toggleBrainPanel() {
     el.brainPanel.classList.contains("hidden") ? openBrainPanel() : closeBrainPanel();
   }
+
+  // ---- Project files panel + @file mentions (Phase 6 slice 2) -------------
+  // Attaching a project file reuses the existing "doc" attachment pipeline, so
+  // its contents ride into the next request like any other attached document —
+  // which means it works for EVERY model, local or cloud.
+  let fsTreeLoaded = false;
+
+  async function attachProjectFile(rel) {
+    if (!rel) return;
+    if (attachments.some((a) => a.kind === "doc" && a.name === rel)) {
+      toast(rel + " is already attached.");
+      return;
+    }
+    try {
+      const res = await fetch("/api/fs/read?path=" + encodeURIComponent(rel));
+      const d = await res.json();
+      if (!res.ok || d.error) return toast(d.error || "Could not read file.");
+      if (d.binary) return toast("Can't attach a binary file.");
+      attachments.push({ kind: "doc", name: rel, text: d.content, truncated: d.truncated });
+      renderAttachStrip();
+      toast("Attached " + rel);
+    } catch (_) {
+      toast("Could not read " + rel);
+    }
+  }
+
+  async function loadFileTree() {
+    try {
+      const [proj, tree] = await Promise.all([
+        fetch("/api/project").then((r) => r.json()),
+        fetch("/api/fs/tree").then((r) => r.json()),
+      ]);
+      if (el.filesRoot) el.filesRoot.textContent = proj.name || "project";
+      renderFileTree(tree.entries || [], tree.truncated);
+      fsTreeLoaded = true;
+    } catch (_) {
+      el.filesTree.textContent = "Could not load files.";
+    }
+  }
+
+  function renderFileTree(entries, truncated) {
+    el.filesTree.replaceChildren();
+    for (const entry of entries) {
+      const row = document.createElement("div");
+      row.className = "file-row file-" + entry.type;
+      const depth = entry.path.split("/").length - 1;
+      row.style.paddingLeft = 8 + depth * 14 + "px";
+      const base = entry.path.split("/").pop();
+      row.textContent = (entry.type === "dir" ? "📁 " : "📄 ") + base;
+      if (entry.type === "file") {
+        row.title = "Attach " + entry.path;
+        row.dataset.path = entry.path;
+      }
+      el.filesTree.appendChild(row);
+    }
+    if (truncated) {
+      const more = document.createElement("div");
+      more.className = "files-hint";
+      more.textContent = "… list truncated (large project).";
+      el.filesTree.appendChild(more);
+    }
+  }
+
+  function openFilesPanel() {
+    el.filesPanel.classList.remove("hidden");
+    el.filesToggle.classList.add("brain-active");
+    if (!fsTreeLoaded) loadFileTree();
+  }
+  function closeFilesPanel() {
+    el.filesPanel.classList.add("hidden");
+    el.filesToggle.classList.remove("brain-active");
+  }
+  function toggleFilesPanel() {
+    el.filesPanel.classList.contains("hidden") ? openFilesPanel() : closeFilesPanel();
+  }
+
+  el.filesToggle?.addEventListener("click", toggleFilesPanel);
+  el.filesClose?.addEventListener("click", closeFilesPanel);
+  el.filesTree?.addEventListener("click", (e) => {
+    const row = e.target.closest(".file-row[data-path]");
+    if (row) attachProjectFile(row.dataset.path);
+  });
+  el.filesChange?.addEventListener("click", async () => {
+    const path = prompt("Project folder — absolute path inside your home:");
+    if (!path) return;
+    try {
+      const res = await fetch("/api/project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path }),
+      });
+      const d = await res.json();
+      if (!res.ok || d.error) return toast(d.error || "Could not set folder.");
+      fsTreeLoaded = false;
+      loadFileTree();
+      toast("Project: " + d.name);
+    } catch (_) {
+      toast("Could not set folder.");
+    }
+  });
+
+  // -- @file autocomplete: its own palette; the "/" command palette is untouched --
+  function filePaletteOpen() {
+    return el.filePalette && !el.filePalette.classList.contains("hidden");
+  }
+  function hideFilePalette() {
+    if (el.filePalette) el.filePalette.classList.add("hidden");
+    fileMatches = [];
+  }
+  function renderFilePalette() {
+    el.filePalette.replaceChildren();
+    fileMatches.forEach((rel, i) => {
+      const item = document.createElement("div");
+      item.className = "cmd-item" + (i === fileActive ? " active" : "");
+      item.dataset.idx = String(i);
+      const nm = document.createElement("span");
+      nm.className = "cmd-name";
+      nm.textContent = "@" + rel.split("/").pop();
+      const ds = document.createElement("span");
+      ds.className = "cmd-desc";
+      ds.textContent = rel;
+      item.append(nm, document.createTextNode(" "), ds);
+      el.filePalette.appendChild(item);
+    });
+  }
+  async function updateFilePalette() {
+    const before = el.input.value.slice(0, el.input.selectionEnd);
+    const m = before.match(/@([^\s@]*)$/);
+    if (!m) return hideFilePalette();
+    try {
+      const res = await fetch("/api/fs/search?q=" + encodeURIComponent(m[1]));
+      const d = await res.json();
+      fileMatches = d.hits || [];
+    } catch (_) {
+      fileMatches = [];
+    }
+    if (!fileMatches.length) return hideFilePalette();
+    fileActive = 0;
+    renderFilePalette();
+    el.filePalette.classList.remove("hidden");
+  }
+  function applyFile(rel) {
+    hideFilePalette();
+    el.input.value = el.input.value.replace(/@[^\s@]*$/, ""); // drop the typed @token
+    autogrow();
+    el.input.focus();
+    attachProjectFile(rel);
+  }
+  el.filePalette?.addEventListener("mousedown", (e) => {
+    const item = e.target.closest(".cmd-item");
+    if (!item) return;
+    e.preventDefault();
+    applyFile(fileMatches[parseInt(item.dataset.idx, 10)]);
+  });
+  el.input.addEventListener("input", updateFilePalette);
 
   // Index health (embed model, note count, last reindex) — loaded at startup.
   async function loadSecondBrainHealth() {

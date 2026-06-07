@@ -124,6 +124,17 @@
           </button>
 
           <button
+            id="filesToggle"
+            class="icon-btn"
+            title="Project files"
+            aria-label="Project files"
+          >
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+              <path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M3 6.5A1.5 1.5 0 0 1 4.5 5h3.8l1.7 2.2h6.5A1.5 1.5 0 0 1 18 8.7v8.8A1.5 1.5 0 0 1 16.5 19h-12A1.5 1.5 0 0 1 3 17.5z" />
+            </svg>
+          </button>
+
+          <button
             id="brainToggle"
             class="icon-btn"
             title="Second brain — sources &amp; knowledge graph"
@@ -307,6 +318,7 @@
             </div>
           </div>
           <div class="cmd-palette hidden" id="cmdPalette" role="listbox" aria-label="Commands"></div>
+          <div class="cmd-palette hidden" id="filePalette" role="listbox" aria-label="Project files"></div>
           <div class="attach-strip hidden" id="attachStrip" aria-label="Attachments"></div>
           <div class="input-bar">
             <button
@@ -360,6 +372,21 @@
         </div>
       </footer>
     </div>
+
+    <!-- Project files panel (Phase 6) -->
+    <aside class="files-panel hidden" id="filesPanel" aria-label="Project files">
+      <div class="files-head">
+        <span class="files-title">&#128193; <span id="filesRoot">workspace</span></span>
+        <button id="filesChange" class="ghost-btn files-change" type="button" title="Change project folder">Change</button>
+        <button id="filesClose" class="brain-close icon-btn" title="Close" aria-label="Close">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
+      <div class="files-tree" id="filesTree" aria-label="File tree"></div>
+      <div class="files-hint">Click a file to attach it to your next message, or type <kbd>@</kbd> in the composer to search files.</div>
+    </aside>
 
     <!-- Second-Brain / RAG Explorer panel -->
     <aside class="brain-panel hidden" id="brainPanel" aria-label="Second brain">
