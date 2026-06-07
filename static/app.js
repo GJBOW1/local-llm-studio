@@ -199,6 +199,8 @@
     filePalette: document.getElementById("filePalette"),
     agentWritesToggle: document.getElementById("agentWritesToggle"),
     agentWritesState: document.getElementById("agentWritesState"),
+    agentApprovalToggle: document.getElementById("agentApprovalToggle"),
+    agentApprovalState: document.getElementById("agentApprovalState"),
     filesChanges: document.getElementById("filesChanges"),
     changesRefresh: document.getElementById("changesRefresh"),
   });
@@ -1577,6 +1579,94 @@
     scrollToBottom();
   }
 
+  // Approve/Reject card for a model-proposed file change (Phase 6: per-edit
+  // approval). Mirrors the iMessage send card: the change is applied ONLY here,
+  // on Approve — the model can't apply it itself.
+  function showChangeConfirm(bodyEl, change) {
+    const bubble = bodyEl.parentElement;
+    if (!bubble || !change || !change.id) return;
+
+    const card = document.createElement("div");
+    card.className = "send-card change-confirm";
+
+    const head = document.createElement("div");
+    head.className = "send-card-head";
+    head.textContent = "✎ Apply this change?";
+
+    const summary = document.createElement("div");
+    summary.className = "send-card-to";
+    summary.textContent = change.summary || change.op || "file change";
+    card.append(head, summary);
+
+    if (change.diff) {
+      const pre = document.createElement("pre");
+      pre.className = "change-diff";
+      renderDiffInto(pre, { diff: change.diff });
+      card.appendChild(pre);
+    }
+
+    const status = document.createElement("div");
+    status.className = "send-card-status hidden";
+    const actions = document.createElement("div");
+    actions.className = "send-card-actions";
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = "send-card-send";
+    okBtn.textContent = "Approve";
+    const noBtn = document.createElement("button");
+    noBtn.type = "button";
+    noBtn.className = "send-card-cancel";
+    noBtn.textContent = "Reject";
+    actions.append(okBtn, noBtn);
+
+    const finish = (cls, label) => {
+      status.classList.remove("hidden", "ok", "err");
+      status.classList.add(cls);
+      status.textContent = label;
+      okBtn.disabled = true;
+      noBtn.disabled = true;
+    };
+
+    noBtn.addEventListener("click", async () => {
+      try {
+        await fetch("/api/agent/change/reject", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: change.id }),
+        });
+      } catch (_) {}
+      finish("err", "Rejected — nothing changed.");
+    });
+    okBtn.addEventListener("click", async () => {
+      okBtn.disabled = true;
+      noBtn.disabled = true;
+      status.classList.remove("hidden", "ok", "err");
+      status.textContent = "Applying…";
+      try {
+        const res = await fetch("/api/agent/change/approve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: change.id }),
+        });
+        const d = await res.json();
+        if (res.ok && d.ok) {
+          finish("ok", d.message || "Applied ✓");
+          loadChanges();
+          fsTreeLoaded = false;
+          loadFileTree();
+        } else {
+          finish("err", "Failed: " + (d.message || d.error || "unknown error"));
+        }
+      } catch (err) {
+        finish("err", "Failed: " + err.message);
+      }
+    });
+
+    card.append(actions, status);
+    bubble.insertBefore(card, bodyEl);
+    scrollToBottom();
+  }
+
   // Render generated media (image / audio / video) below the answer. Attaches to
   // the bubble (the answer node itself gets rewritten by renderInto on each chunk),
   // so it survives streaming. URL is either a /api/media/ path or a remote provider
@@ -1765,7 +1855,28 @@
       el.agentWritesState.textContent = d.enabled ? "ON — model can edit files" : "off";
       el.agentWritesState.classList.toggle("on", !!d.enabled);
     } catch (_) {}
+    try {
+      const a = await fetch("/api/agent/approval").then((r) => r.json());
+      el.agentApprovalToggle.checked = !!a.required;
+      el.agentApprovalState.textContent = a.required ? "on" : "off — applies directly";
+      el.agentApprovalState.classList.toggle("on", !!a.required);
+    } catch (_) {}
   }
+  el.agentApprovalToggle?.addEventListener("change", async () => {
+    const required = el.agentApprovalToggle.checked;
+    try {
+      const a = await fetch("/api/agent/approval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ required }),
+      }).then((r) => r.json());
+      el.agentApprovalState.textContent = a.required ? "on" : "off — applies directly";
+      el.agentApprovalState.classList.toggle("on", !!a.required);
+      toast(a.required ? "Each edit needs your approval." : "Edits apply directly (still undoable).");
+    } catch (_) {
+      toast("Could not change the setting.");
+    }
+  });
   el.agentWritesToggle?.addEventListener("change", async () => {
     const enabled = el.agentWritesToggle.checked;
     try {
@@ -2866,6 +2977,7 @@
           // (ansEl's parent is the bubble the helpers insert into).
           if (obj.tool_event) { showToolChip(ansEl, obj.tool_event); colObj.body.scrollTop = colObj.body.scrollHeight; continue; }
           if (obj.confirm_send) { showSendConfirm(ansEl, obj.confirm_send); colObj.body.scrollTop = colObj.body.scrollHeight; continue; }
+          if (obj.confirm_change) { showChangeConfirm(ansEl, obj.confirm_change); colObj.body.scrollTop = colObj.body.scrollHeight; continue; }
           if (obj.media) { renderMedia(ansEl, obj.media); colObj.body.scrollTop = colObj.body.scrollHeight; continue; }
           if (obj.doc_event) { if (obj.doc_event.updated && !userHasPen) loadDoc(); continue; }
           if (obj.message && obj.message.content) {
@@ -3334,6 +3446,10 @@
           if (obj.confirm_send) {
             showSendConfirm(assistantBody, obj.confirm_send);
             continue; // a Send/Cancel card, no message payload
+          }
+          if (obj.confirm_change) {
+            showChangeConfirm(assistantBody, obj.confirm_change);
+            continue; // an Approve/Reject card, no message payload
           }
           if (obj.tool_event) {
             showToolChip(assistantBody, obj.tool_event);

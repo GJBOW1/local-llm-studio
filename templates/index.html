@@ -393,6 +393,13 @@
         </label>
         <span class="agent-state" id="agentWritesState">off</span>
       </div>
+      <div class="agent-row">
+        <label class="agent-toggle" title="When on, each change the model proposes shows an Approve/Reject card (with a diff) before it is applied.">
+          <input type="checkbox" id="agentApprovalToggle" checked />
+          <span>&#9745;&#65039; Require approval</span>
+        </label>
+        <span class="agent-state on" id="agentApprovalState">on</span>
+      </div>
       <div class="files-changes-head">Changes <button id="changesRefresh" class="ghost-btn" type="button" title="Refresh">&#8635;</button></div>
       <div class="files-changes" id="filesChanges" aria-label="Changes"><div class="files-hint">No changes yet.</div></div>
     </aside>

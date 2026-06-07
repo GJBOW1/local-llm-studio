@@ -1108,6 +1108,10 @@ def _execute_tool(name: str, args: dict[str, Any]) -> tuple[str, list[bytes]]:
     if name == "edit_document":
         result = _apply_doc_edit(str(args.get("find") or ""), str(args.get("replace") or ""))
         return result, [_nd({"doc_event": {"updated": result == "Document updated.", "note": result}})]
+    # Agentic file change with approval required → stage it and show an Approve/
+    # Reject card instead of applying. The model can never apply it itself.
+    if name in _CRUD_TOOL_NAMES and AGENT_WRITES_ENABLED and AGENT_APPROVAL_REQUIRED:
+        return _stage_change(name, args)
     events = [_nd({"tool_event": {"phase": "call", "name": name, "args": args}})]
     result = _dispatch_tool(name, args)
     events.append(_nd({"tool_event": {"phase": "result", "name": name, "preview": result[:240]}}))
@@ -2337,7 +2341,53 @@ import shutil
 import uuid
 
 AGENT_WRITES_ENABLED: bool = False
+AGENT_APPROVAL_REQUIRED: bool = True  # when True, the model's edits are staged for Approve/Reject
 _AGENT_LOCK = threading.Lock()
+_CRUD_TOOL_NAMES = {"project_write", "project_create_folder", "project_move", "project_delete"}
+_PENDING_CHANGES: dict[str, dict[str, Any]] = {}  # id -> {name, args}
+
+
+def _change_summary(name: str, args: dict[str, Any]) -> str:
+    if name == "project_write":
+        return "Write " + str(args.get("path", "?"))
+    if name == "project_create_folder":
+        return "Create folder " + str(args.get("path", "?"))
+    if name == "project_move":
+        return "Move " + str(args.get("from", "?")) + " → " + str(args.get("to", "?"))
+    if name == "project_delete":
+        return "Delete " + str(args.get("path", "?"))
+    return name
+
+
+def _proposed_diff(args: dict[str, Any]) -> str:
+    """Unified diff between a file's current content and the model's proposed content."""
+    import difflib
+    rel = str(args.get("path") or "")
+    p = _project_path(rel)
+    before = ""
+    if p and os.path.isfile(p):
+        try:
+            with open(p, "rb") as fh:
+                before = fh.read(_FS_READ_CAP).decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            before = ""
+    after = str(args.get("content") or "")
+    return "".join(difflib.unified_diff(
+        before.splitlines(keepends=True), after.splitlines(keepends=True),
+        fromfile=rel + " (current)", tofile=rel + " (proposed)", n=3))
+
+
+def _stage_change(name: str, args: dict[str, Any]) -> "tuple[str, list[bytes]]":
+    """Hold a model-proposed change and emit an Approve/Reject card. Applied only
+    when the user approves (api_change_approve), never by the model."""
+    cid = "ch" + uuid.uuid4().hex[:10]
+    _PENDING_CHANGES[cid] = {"name": name, "args": args}
+    card: dict[str, Any] = {"id": cid, "op": name, "summary": _change_summary(name, args)}
+    if name == "project_write":
+        card["diff"] = _proposed_diff(args)
+    result = ("Staged this change for the user's approval — it is applied ONLY if they tap "
+              "Approve; you cannot apply it yourself. Wait for their decision and don't repeat it.")
+    return result, [_nd({"confirm_change": card})]
 
 
 def _agent_dir() -> str:
@@ -2571,6 +2621,37 @@ def api_agent_writes_set() -> Response:
     data = request.get_json(silent=True) or {}
     AGENT_WRITES_ENABLED = bool(data.get("enabled"))
     return jsonify({"enabled": AGENT_WRITES_ENABLED})
+
+
+@app.get("/api/agent/approval")
+def api_agent_approval_get() -> Response:
+    return jsonify({"required": AGENT_APPROVAL_REQUIRED})
+
+
+@app.post("/api/agent/approval")
+def api_agent_approval_set() -> Response:
+    """Require Approve/Reject for each agent edit (on by default)."""
+    global AGENT_APPROVAL_REQUIRED
+    AGENT_APPROVAL_REQUIRED = bool((request.get_json(silent=True) or {}).get("required"))
+    return jsonify({"required": AGENT_APPROVAL_REQUIRED})
+
+
+@app.post("/api/agent/change/approve")
+def api_change_approve() -> Response:
+    """Apply a staged change (the only path that applies a model-proposed edit)."""
+    cid = str((request.get_json(silent=True) or {}).get("id") or "")
+    pend = _PENDING_CHANGES.pop(cid, None)
+    if not pend:
+        return jsonify({"error": "No such pending change (already handled or expired)."}), 404
+    msg = _dispatch_tool(pend["name"], pend["args"])  # applies + journals via the CRUD core
+    return jsonify({"ok": True, "message": msg})
+
+
+@app.post("/api/agent/change/reject")
+def api_change_reject() -> Response:
+    cid = str((request.get_json(silent=True) or {}).get("id") or "")
+    _PENDING_CHANGES.pop(cid, None)
+    return jsonify({"ok": True})
 
 
 @app.get("/api/fs/changes")
