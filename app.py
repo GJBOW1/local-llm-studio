@@ -2183,6 +2183,140 @@ def imessage_send() -> Response:
     return jsonify({"ok": ok, "result": result})
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Project filesystem API (Phase 6, slice 1) — a path-jailed, READ-ONLY view of
+# the folder the agent works in. Foundation for the file-tree sidebar (#1),
+# @file mentions (#8), and the (approval-gated) agentic file/exec tools (#2/#3).
+# Every path resolves through a realpath jail that refuses to escape the root.
+# ─────────────────────────────────────────────────────────────────────────
+_PROJECT_LOCK = threading.Lock()
+_DEFAULT_PROJECT_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspace")
+PROJECT_ROOT: str = os.path.realpath(os.path.expanduser(
+    os.environ.get("LLS_PROJECT_ROOT") or _LOCAL_CONFIG.get("LLS_PROJECT_ROOT") or _DEFAULT_PROJECT_ROOT
+))
+os.makedirs(PROJECT_ROOT, exist_ok=True)
+
+_FS_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache",
+                 ".pytest_cache", "graphify-out", "dist", "build"}
+_FS_TREE_CAP = 4000        # max entries from /api/fs/tree
+_FS_READ_CAP = 200_000     # max bytes from /api/fs/read
+_FS_SEARCH_CAP = 50        # max hits from /api/fs/search
+
+
+def _project_path(rel: str) -> "str | None":
+    """Resolve `rel` inside PROJECT_ROOT; returns the absolute realpath, or None
+    if it escapes the jail (callers 400 instead of touching outside files)."""
+    root = os.path.realpath(PROJECT_ROOT)
+    p = os.path.realpath(os.path.join(root, rel or ""))
+    return p if (p == root or p.startswith(root + os.sep)) else None
+
+
+@app.get("/api/project")
+def api_project_get() -> Response:
+    """Report the current project root."""
+    root = PROJECT_ROOT
+    return jsonify({"root": root, "name": os.path.basename(root.rstrip(os.sep)) or root,
+                    "exists": os.path.isdir(root)})
+
+
+@app.post("/api/project")
+def api_project_set() -> Response:
+    """Set the project root to any existing directory inside the user's home."""
+    global PROJECT_ROOT
+    data = request.get_json(silent=True) or {}
+    raw = str(data.get("path", "")).strip()
+    if not raw:
+        return jsonify({"error": "Body must include 'path'."}), 400
+    cand = os.path.realpath(os.path.expanduser(raw))
+    home = os.path.realpath(os.path.expanduser("~"))
+    if not (cand == home or cand.startswith(home + os.sep)):
+        return jsonify({"error": "Project root must be inside your home folder."}), 400
+    if not os.path.isdir(cand):
+        return jsonify({"error": "Not a directory."}), 400
+    with _PROJECT_LOCK:
+        PROJECT_ROOT = cand
+    return jsonify({"root": cand, "name": os.path.basename(cand.rstrip(os.sep)) or cand})
+
+
+@app.get("/api/fs/tree")
+def api_fs_tree() -> Response:
+    """Flat, path-jailed listing of the project (rel path + type + size), capped,
+    skipping noise dirs. The UI builds the tree view from this."""
+    root = os.path.realpath(PROJECT_ROOT)
+    out: list[dict[str, Any]] = []
+    truncated = False
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in _FS_SKIP_DIRS and not d.startswith("."))
+        for name in list(dirnames):
+            rel = os.path.relpath(os.path.join(dirpath, name), root)
+            out.append({"path": rel, "type": "dir"})
+            if len(out) >= _FS_TREE_CAP:
+                truncated = True
+                break
+        if truncated:
+            break
+        for name in sorted(filenames):
+            if name == ".DS_Store":
+                continue
+            full = os.path.join(dirpath, name)
+            rel = os.path.relpath(full, root)
+            try:
+                size = os.path.getsize(full)
+            except OSError:
+                size = 0
+            out.append({"path": rel, "type": "file", "size": size})
+            if len(out) >= _FS_TREE_CAP:
+                truncated = True
+                break
+        if truncated:
+            break
+    return jsonify({"root": root, "entries": out, "truncated": truncated})
+
+
+@app.get("/api/fs/read")
+def api_fs_read() -> Response:
+    """Return a project file's text content, path-jailed and size-capped."""
+    rel = request.args.get("path", "")
+    p = _project_path(rel)
+    if not p:
+        return jsonify({"error": "Path escapes the project root."}), 400
+    if not os.path.isfile(p):
+        return jsonify({"error": "Not a file."}), 404
+    try:
+        with open(p, "rb") as fh:
+            raw = fh.read(_FS_READ_CAP + 1)
+    except OSError as exc:
+        return jsonify({"error": f"Could not read: {exc}"}), 500
+    truncated = len(raw) > _FS_READ_CAP
+    raw = raw[:_FS_READ_CAP]
+    try:
+        text = raw.decode("utf-8")
+        binary = False
+    except UnicodeDecodeError:
+        text, binary = "", True
+    return jsonify({"path": rel, "content": text, "binary": binary, "truncated": truncated})
+
+
+@app.get("/api/fs/search")
+def api_fs_search() -> Response:
+    """Filename search under the project root for @file autocomplete — query is a
+    case-insensitive substring of the relative path; capped."""
+    q = request.args.get("q", "").strip().lower()
+    root = os.path.realpath(PROJECT_ROOT)
+    hits: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _FS_SKIP_DIRS and not d.startswith(".")]
+        for name in filenames:
+            if name == ".DS_Store":
+                continue
+            rel = os.path.relpath(os.path.join(dirpath, name), root)
+            if not q or q in rel.lower():
+                hits.append(rel)
+                if len(hits) >= _FS_SEARCH_CAP:
+                    return jsonify({"hits": sorted(hits)[:_FS_SEARCH_CAP], "truncated": True})
+    return jsonify({"hits": sorted(hits), "truncated": False})
+
+
 if __name__ == "__main__":
     import atexit
     import signal
