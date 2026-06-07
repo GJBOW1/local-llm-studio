@@ -1761,31 +1761,79 @@
       return;
     }
     const verbs = { create: "＋", update: "✎", mkdir: "📁＋", move: "→", delete: "🗑" };
+    const hasDiff = { create: 1, update: 1, delete: 1 };
     for (const c of changes) {
       const row = document.createElement("div");
       row.className = "change-row" + (c.undone ? " undone" : "");
+      const line = document.createElement("div");
+      line.className = "change-line";
       const label = document.createElement("span");
       label.className = "change-label";
       label.textContent = (verbs[c.op] || c.op) + " " + c.path + (c.to ? " → " + c.to : "");
       label.title = (c.ts || "") + " · " + c.op;
-      row.appendChild(label);
+      line.appendChild(label);
+      if (hasDiff[c.op]) {
+        const view = document.createElement("button");
+        view.className = "change-view";
+        view.type = "button";
+        view.textContent = "View";
+        view.dataset.diff = c.id;
+        line.appendChild(view);
+      }
       if (c.undone) {
         const tag = document.createElement("span");
         tag.className = "change-undone-tag";
         tag.textContent = "undone";
-        row.appendChild(tag);
+        line.appendChild(tag);
       } else {
         const btn = document.createElement("button");
         btn.className = "change-undo";
         btn.type = "button";
         btn.textContent = "Undo";
         btn.dataset.id = c.id;
-        row.appendChild(btn);
+        line.appendChild(btn);
       }
+      const diffEl = document.createElement("pre");
+      diffEl.className = "change-diff hidden";
+      row.append(line, diffEl);
       el.filesChanges.appendChild(row);
     }
   }
+  function renderDiffInto(pre, d) {
+    pre.replaceChildren();
+    if (d.error) return void (pre.textContent = d.error);
+    if (d.note) return void (pre.textContent = d.note);
+    const diff = d.diff || "";
+    if (!diff.trim()) return void (pre.textContent = "(no textual changes — possibly a binary file)");
+    for (const ln of diff.split("\n")) {
+      const span = document.createElement("span");
+      const c0 = ln.charAt(0);
+      span.className = "dl " + (
+        c0 === "+" && !ln.startsWith("+++") ? "add" :
+        c0 === "-" && !ln.startsWith("---") ? "del" :
+        ln.startsWith("@@") ? "hunk" : "ctx");
+      span.textContent = ln + "\n";
+      pre.appendChild(span);
+    }
+  }
   el.filesChanges?.addEventListener("click", async (e) => {
+    const viewBtn = e.target.closest(".change-view[data-diff]");
+    if (viewBtn) {
+      const pre = viewBtn.closest(".change-row").querySelector(".change-diff");
+      if (!pre.classList.contains("hidden")) {
+        pre.classList.add("hidden");
+        return;
+      }
+      pre.classList.remove("hidden");
+      pre.textContent = "loading…";
+      try {
+        const d = await fetch("/api/fs/diff?id=" + encodeURIComponent(viewBtn.dataset.diff)).then((r) => r.json());
+        renderDiffInto(pre, d);
+      } catch (_) {
+        pre.textContent = "Could not load diff.";
+      }
+      return;
+    }
     const btn = e.target.closest(".change-undo[data-id]");
     if (!btn) return;
     try {

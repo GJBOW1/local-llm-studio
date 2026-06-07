@@ -2587,6 +2587,41 @@ def api_fs_undo() -> Response:
     return jsonify({"message": msg})
 
 
+@app.get("/api/fs/diff")
+def api_fs_diff() -> Response:
+    """A before→after unified diff for a journaled change, so the user can review
+    exactly what the agent did. Uses the checkpoint copy (updates) or the trashed
+    copy (deletes) saved at change time."""
+    import difflib
+    cid = request.args.get("id", "")
+    entry = next((e for e in _journal_load() if e.get("id") == cid), None)
+    if not entry:
+        return jsonify({"error": "No such change."}), 404
+    op, rel = entry.get("op"), entry.get("path")
+    if op in ("mkdir", "move"):
+        return jsonify({"op": op, "path": rel, "to": entry.get("to"), "diff": "",
+                        "note": f"{op} — no file-content change to diff."})
+
+    def _read(path: "str | None") -> str:
+        if not path or not os.path.isfile(path):
+            return ""
+        try:
+            with open(path, "rb") as fh:
+                return fh.read(_FS_READ_CAP).decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            return ""
+
+    cur = _project_path(rel)
+    ck = os.path.join(_agent_dir(), "checkpoints", entry["backup"]) if entry.get("backup") else None
+    tr = os.path.join(_agent_dir(), "trash", entry["trash"]) if entry.get("trash") else None
+    before = _read(ck) if op == "update" else (_read(tr) if op == "delete" else "")
+    after = _read(cur) if op in ("create", "update") else ""
+    diff = "".join(difflib.unified_diff(
+        before.splitlines(keepends=True), after.splitlines(keepends=True),
+        fromfile=rel + " (before)", tofile=rel + " (after)", n=3))
+    return jsonify({"op": op, "path": rel, "diff": diff})
+
+
 # Direct (UI-driven) mutation endpoints — same core, gated the same way.
 @app.post("/api/fs/write")
 def api_fs_write() -> Response:
