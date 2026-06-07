@@ -14,8 +14,8 @@
   const LS_THEME_KEY = "lls.theme";
   const LS_FONT_KEY = "lls.fontScale";
   const TITLE_MAX = 40;
-  const PREFERRED_LOCAL_MODEL = "gemma3:12b-it-qat";
-  const REPLACED_LOCAL_MODELS = new Set(["gemma4:latest", "gemma4:e2b", "gemma4:12b"]);
+  const PREFERRED_LOCAL_MODEL = "gemma4:12b-it-qat";
+  const REPLACED_LOCAL_MODELS = new Set(["gemma4:latest", "gemma4:e2b", "gemma4:12b", "gemma3:12b-it-qat"]);
 
   // Where the lifecycle supervisor lives (empty if run without the launcher).
   const CONTROL_URL = (

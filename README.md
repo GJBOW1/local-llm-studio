@@ -39,7 +39,7 @@ Two processes:
 1. **Ollama installed and running.** Download from <https://ollama.com>, then
    confirm it's up: `ollama list`. Pull the preferred local model:
    ```bash
-   ollama pull gemma3:12b-it-qat
+   ollama pull gemma4:12b-it-qat
    ```
 2. **Python deps** (Flask + requests):
    ```bash
@@ -68,8 +68,9 @@ Pick a model from the dropdown (the connection dot turns green when Ollama is
 reachable) and start chatting. Enter sends; Shift+Enter adds a newline; **Stop**
 aborts an in-flight stream; **New chat** clears the conversation. Your last-used
 model and your conversations are remembered in `localStorage`. When installed,
-`gemma3:12b-it-qat` (Gemma 3 12B, quantization-aware-trained) is the preferred
-local model, and older saved Gemma selections are migrated to it automatically.
+`gemma4:12b-it-qat` (Gemma 4 12B, quantization-aware-trained — tool-capable, so
+it can drive the agentic file tools) is the preferred local model, and older
+saved Gemma selections are migrated to it automatically.
 Models that don't support tool-calling (e.g. Gemma 3) fall back to plain chat
 automatically — only tool-capable models are sent the MCP/native tools.
 
