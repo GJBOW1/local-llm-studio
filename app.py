@@ -153,6 +153,24 @@ PROVIDER_KEYS: dict[str, str] = {
     p: (os.environ.get(cfg) or _LOCAL_CONFIG.get(cfg, "")) for p, cfg in PROVIDER_CONFIG_KEY.items()
 }
 PROVIDER_MODELS: dict[str, list[str]] = {p: [] for p in PROVIDER_CONFIG_KEY}
+
+# ── Curated model menu (Phase 6) ──────────────────────────────────────────
+# Only these models are offered in the studio, grouped by provider — everything
+# else is hidden. EDIT THESE LISTS to change the picks (the menu and the
+# auto-download both read from here). Local (Ollama) models are auto-pulled on
+# first use; cloud models are filtered to this set of the account's models.
+CURATED_LOCAL: dict[str, list[str]] = {
+    "Qwen": ["qwen3:8b", "qwen3:14b", "qwen3:32b"],
+    "NVIDIA": ["nemotron-mini:4b", "nemotron:70b"],
+    "Gemma (Google)": ["gemma4:12b-it-qat", "gemma4:12b", "gemma3:12b-it-qat"],
+}
+CURATED_CLOUD: dict[str, list[str]] = {
+    "anthropic": ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+    "openai": ["gpt-5.5", "gpt-5.5-pro", "gpt-5.4-mini"],
+    "grok": ["grok-4.3", "grok-4.20-0309-reasoning", "grok-4.20-multi-agent-0309"],
+}
+# Flat set of every curated local tag, for quick membership tests.
+_CURATED_LOCAL_SET = {m for fam in CURATED_LOCAL.values() for m in fam}
 # OpenAI-compatible chat endpoints. Grok (xAI) and Gemini both expose one, so they
 # reuse the same streamer; only Anthropic needs its own Messages API.
 OPENAI_COMPAT_BASE: dict[str, str] = {
@@ -824,31 +842,56 @@ def ps() -> Response:
 
 @app.get("/api/models")
 def models() -> Response:
-    """List installed Ollama models (name + human-readable size)."""
+    """The curated local models (grouped by provider), each flagged 'installed'
+    or downloadable. Only these are offered — any other installed model is hidden.
+    Selecting a not-installed one triggers /api/pull in the UI."""
+    installed: dict[str, str] = {}  # name -> human size
     try:
         resp = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
-    except requests.RequestException as exc:
-        return (
-            jsonify(
-                {
-                    "error": "Could not reach Ollama. Is it running?",
-                    "detail": str(exc),
-                    "host": OLLAMA_HOST,
-                }
-            ),
-            502,
-        )
+        for m in resp.json().get("models", []):
+            installed[m.get("name", "")] = _human_size(int(m.get("size", 0)))
+    except requests.RequestException:
+        pass  # Ollama unreachable → all show as downloadable; pull reports the real error
+    out: list[dict[str, Any]] = []
+    for group, tags in CURATED_LOCAL.items():
+        for tag in tags:
+            out.append({
+                "name": tag,
+                "group": group,
+                "installed": tag in installed,
+                "size": installed.get(tag, ""),
+            })
+    return jsonify({"models": out})
 
-    payload: dict[str, Any] = resp.json()
-    installed = [
-        {
-            "name": model.get("name", "unknown"),
-            "size": _human_size(int(model.get("size", 0))),
-        }
-        for model in payload.get("models", [])
-    ]
-    return jsonify({"models": installed})
+
+@app.post("/api/pull")
+def api_pull() -> Response:
+    """Download a curated local model via Ollama, streaming progress to the UI as
+    NDJSON ({status, total, completed, ...}). Whitelisted to the curated set so it
+    can never be told to pull an arbitrary model."""
+    data = request.get_json(silent=True) or {}
+    model = str(data.get("model") or "").strip()
+    if model not in _CURATED_LOCAL_SET:
+        return jsonify({"error": "That model isn't in the studio's model list."}), 400
+
+    def generate() -> Iterator[bytes]:
+        try:
+            with requests.post(
+                f"{OLLAMA_HOST}/api/pull", json={"model": model, "stream": True},
+                stream=True, timeout=None,
+            ) as up:
+                if up.status_code >= 400:
+                    yield (json.dumps({"status": "error",
+                                       "error": f"Ollama returned {up.status_code}."}) + "\n").encode("utf-8")
+                    return
+                for line in up.iter_lines():
+                    if line:
+                        yield line + b"\n"
+        except requests.RequestException as exc:
+            yield (json.dumps({"status": "error", "error": str(exc)}) + "\n").encode("utf-8")
+
+    return Response(generate(), mimetype="application/x-ndjson")
 
 
 @app.get("/api/capabilities")
@@ -2071,7 +2114,15 @@ def api_providers() -> Response:
                 PROVIDER_MODELS[p] = _list_provider_models(p, key)
             except Exception:
                 pass
-        out[p] = {"connected": bool(key), "models": PROVIDER_MODELS.get(p, [])}
+        full = PROVIDER_MODELS.get(p, [])
+        curated = CURATED_CLOUD.get(p, [])
+        # Only the curated top-3 the account actually exposes (in curated order);
+        # if connected but none match (e.g. a renamed model), fall back to its first 3.
+        if full:
+            shown = [m for m in curated if m in set(full)] or full[:3]
+        else:
+            shown = curated  # placeholders until the key is connected
+        out[p] = {"connected": bool(key), "models": shown}
     return jsonify(out)
 
 

@@ -613,6 +613,20 @@
     </div>
   </div>
 
+  <!-- Ollama model download progress (auto-pull on selecting an uninstalled model) -->
+  <div class="modal-backdrop hidden" id="pullModal">
+    <div class="modal pull-modal" role="dialog" aria-modal="true" aria-labelledby="pullTitle">
+      <h2 id="pullTitle">Downloading model</h2>
+      <div class="pull-model" id="pullModelName"></div>
+      <div class="pull-bar"><div class="pull-bar-fill" id="pullBarFill"></div></div>
+      <div class="pull-status" id="pullStatus">Starting&hellip;</div>
+      <p class="field-hint" id="pullHint">This downloads once via Ollama. You can keep using the app — it'll be selected automatically when it's ready.</p>
+      <div class="modal-actions">
+        <button class="ghost-btn" id="pullClose" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Telemetry HUD — slide-in right rail (toggle: ⌘T or the topbar chart icon) -->
   <aside class="hud hidden" id="hudPanel" aria-label="Live telemetry">
     <div class="hud-head">

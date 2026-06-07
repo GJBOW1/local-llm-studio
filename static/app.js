@@ -50,10 +50,9 @@
   // Always-visible flagship cloud models (placeholders until the key is connected;
   // once connected, the provider's REAL model list replaces these).
   const FLAGSHIPS = [
-    { provider: "anthropic", id: "claude-opus-4-7", label: "Claude Opus 4.7" },
+    { provider: "anthropic", id: "claude-opus-4-8", label: "Claude Opus 4.8" },
     { provider: "openai", id: "gpt-5.5", label: "GPT-5.5" },
-    { provider: "gemini", id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-    { provider: "grok", id: "grok-4", label: "Grok 4" },
+    { provider: "grok", id: "grok-4.3", label: "Grok 4.3" },
   ];
   const providerOf = (m) => cloudModels[m] || flagshipModels[m] || "";
   let arenaLayout = "grid"; // "grid" | "tabs"
@@ -203,6 +202,11 @@
     agentApprovalState: document.getElementById("agentApprovalState"),
     filesChanges: document.getElementById("filesChanges"),
     changesRefresh: document.getElementById("changesRefresh"),
+    pullModal: document.getElementById("pullModal"),
+    pullModelName: document.getElementById("pullModelName"),
+    pullBarFill: document.getElementById("pullBarFill"),
+    pullStatus: document.getElementById("pullStatus"),
+    pullClose: document.getElementById("pullClose"),
   });
 
   // Per-model capability cache (thinking + context window), filled once per model
@@ -344,7 +348,9 @@
   }
 
   function chooseInitialModel(models, saved) {
-    const installed = new Set(models.map((m) => m.name));
+    // Only actually-installed local models count, so we never auto-select (and
+    // thus auto-download) a not-yet-pulled model on startup.
+    const installed = new Set(models.filter((m) => m.installed !== false).map((m) => m.name));
     if (saved && installed.has(saved)) {
       return REPLACED_LOCAL_MODELS.has(saved) && installed.has(PREFERRED_LOCAL_MODEL)
         ? PREFERRED_LOCAL_MODEL
@@ -374,7 +380,9 @@
       for (const m of models) {
         const opt = document.createElement("option");
         opt.value = m.name;
-        opt.textContent = `${m.name} · ${m.size}`;
+        opt.textContent = m.installed ? `${m.name} · ${m.size}` : `${m.name} · ⬇ download`;
+        opt.dataset.installed = m.installed ? "1" : "0";
+        if (m.group) opt.dataset.group = m.group;
         el.modelPicker.appendChild(opt);
       }
       appendCloudOptions(); // add the ☁ Cloud group (if any providers connected)
@@ -425,11 +433,111 @@
   // ---- Custom model dropdown: favorites section + per-model stars, layered over the
   // hidden native <select> (which a star can't live inside). The select stays the
   // value source-of-truth, so every existing `.value`/change consumer keeps working. ----
+  function localModelInfo(id) {
+    return modelList.find((m) => m.name === id);
+  }
   function selectModel(id) {
     if (!id) return;
+    const info = localModelInfo(id);
+    if (info && info.installed === false) {
+      // Not pulled yet → download it first; selection happens when it's ready.
+      closeModelMenu();
+      startPull(id);
+      return;
+    }
     el.modelPicker.value = id;
     el.modelPicker.dispatchEvent(new Event("change")); // reuse all existing change wiring
     closeModelMenu();
+  }
+
+  // ---- Auto-download a curated Ollama model with a live progress modal ----
+  let pulling = false;
+  function setPullStatus(text, pct, cls) {
+    if (el.pullStatus) {
+      el.pullStatus.textContent = text;
+      el.pullStatus.classList.remove("ok", "err");
+      if (cls) el.pullStatus.classList.add(cls);
+    }
+    if (el.pullBarFill) {
+      if (pct == null) {
+        el.pullBarFill.classList.add("indeterminate");
+      } else {
+        el.pullBarFill.classList.remove("indeterminate");
+        el.pullBarFill.style.width = Math.max(0, Math.min(100, pct)) + "%";
+      }
+    }
+  }
+  function openPullModal(model) {
+    if (el.pullModelName) el.pullModelName.textContent = model;
+    setPullStatus("Starting…", null);
+    el.pullModal?.classList.remove("hidden");
+  }
+  function closePullModal() {
+    el.pullModal?.classList.add("hidden");
+  }
+  el.pullClose?.addEventListener("click", closePullModal);
+
+  async function startPull(model) {
+    if (pulling) return;
+    pulling = true;
+    openPullModal(model);
+    try {
+      const res = await fetch("/api/pull", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model }),
+      });
+      if (!res.ok || !res.body) {
+        const e = await res.json().catch(() => ({}));
+        setPullStatus(e.error || "Download failed.", 0, "err");
+        pulling = false;
+        return;
+      }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      let ok = false;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let o;
+          try { o = JSON.parse(line); } catch (_) { continue; }
+          if (o.error || o.status === "error") {
+            setPullStatus(o.error || "Download failed.", 0, "err");
+            pulling = false;
+            return;
+          }
+          const status = o.status || "downloading";
+          if (typeof o.total === "number" && o.total > 0 && typeof o.completed === "number") {
+            const pct = (o.completed / o.total) * 100;
+            const gb = (n) => (n / 1e9).toFixed(1);
+            setPullStatus(`${status} — ${gb(o.completed)} / ${gb(o.total)} GB`, pct);
+          } else {
+            setPullStatus(status + "…", null);
+          }
+          if (status === "success") ok = true;
+        }
+      }
+      pulling = false;
+      if (ok) await pullDone(model);
+      else setPullStatus("Download ended unexpectedly.", 0, "err");
+    } catch (err) {
+      pulling = false;
+      setPullStatus("Download failed: " + (err.message || err), 0, "err");
+    }
+  }
+
+  async function pullDone(model) {
+    setPullStatus("✓ Ready — " + model + " is downloaded and selected.", 100, "ok");
+    await loadModels(); // refresh so it's now marked installed
+    el.modelPicker.value = model;
+    el.modelPicker.dispatchEvent(new Event("change"));
+    setTimeout(closePullModal, 1600);
   }
   function updateModelMenuBtn() {
     if (!el.modelMenuLabel) return;
