@@ -24,3 +24,7 @@ config.local.json
 .DS_Store
 *.log
 node_modules/
+
+# Server-side session mirror + agentic change journal/checkpoints (local data)
+.lls-sessions/
+.lls-agent/

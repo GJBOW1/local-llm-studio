@@ -229,6 +229,41 @@
     }
   }
 
+  // ---- Server-side session mirror (Phase 6: resumable sessions) ----
+  // localStorage stays the working store; we also push each saved conversation
+  // to the server and, at startup, pull any sessions missing locally — so a
+  // cleared cache (or a new browser) still shows past chats.
+  function mirrorSession(convo) {
+    fetch("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(convo),
+    }).catch(() => {}); // best-effort
+  }
+  function deleteSessionOnServer(id) {
+    fetch("/api/sessions/" + encodeURIComponent(id), { method: "DELETE" }).catch(() => {});
+  }
+  async function backfillSessionsFromServer() {
+    try {
+      const d = await fetch("/api/sessions").then((r) => r.json());
+      const server = d.sessions || [];
+      if (!server.length) return;
+      const byId = new Map(loadConvos().map((c) => [c.id, c]));
+      let changed = false;
+      for (const s of server) {
+        if (!s || !s.id) continue;
+        const cur = byId.get(s.id);
+        if (!cur || (s.updatedAt || 0) > (cur.updatedAt || 0)) {
+          byId.set(s.id, s);
+          changed = true;
+        }
+      }
+      if (changed) saveConvos(Array.from(byId.values()));
+    } catch (_) {
+      /* offline / no server store yet — localStorage still works */
+    }
+  }
+
   function newId() {
     return "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   }
@@ -276,6 +311,7 @@
     if (idx >= 0) list[idx] = convo;
     else list.push(convo);
     saveConvos(list);
+    mirrorSession(convo); // durable server copy
     renderSidebar();
   }
 
@@ -857,6 +893,7 @@
   function deleteConvo(id) {
     const list = loadConvos().filter((c) => c.id !== id);
     saveConvos(list);
+    deleteSessionOnServer(id); // remove the server mirror too
     if (id === activeId) startNewChat();
     else renderSidebar();
   }
@@ -3689,9 +3726,12 @@
   refreshHealth();
   healthTimer = setInterval(refreshHealth, 8000);
 
-  // Reopen the most-recent conversation, or start an empty chat if none exist.
-  renderSidebar();
-  const existing = loadConvos().sort((a, b) => b.updatedAt - a.updatedAt);
-  if (existing.length > 0) openConvo(existing[0].id);
-  else startNewChat();
+  // Pull any server-stored sessions missing locally (so a cleared cache still
+  // shows past chats), then reopen the most-recent conversation.
+  backfillSessionsFromServer().finally(() => {
+    renderSidebar();
+    const existing = loadConvos().sort((a, b) => b.updatedAt - a.updatedAt);
+    if (existing.length > 0) openConvo(existing[0].id);
+    else startNewChat();
+  });
 })();

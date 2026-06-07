@@ -2643,6 +2643,75 @@ def api_fs_delete() -> Response:
     return jsonify({"message": _crud_delete(request.get_json(silent=True) or {})})
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Resumable sessions (Phase 6) — a server-side mirror of the browser's
+# localStorage conversation store, so chats survive a cache clear and can be
+# reopened. The browser stays the working store and POSTs each turn here; on
+# startup it backfills any sessions missing locally. Stored as one JSON per
+# session under .lls-sessions/ (gitignored).
+# ─────────────────────────────────────────────────────────────────────────
+SESSIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".lls-sessions")
+os.makedirs(SESSIONS_DIR, exist_ok=True)
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_SESSION_MAX_BYTES = 8_000_000  # refuse absurdly large payloads
+
+
+def _session_file(sid: Any) -> "str | None":
+    if not isinstance(sid, str) or not _SESSION_ID_RE.match(sid):
+        return None
+    return os.path.join(SESSIONS_DIR, sid + ".json")
+
+
+@app.get("/api/sessions")
+def api_sessions_list() -> Response:
+    """All stored sessions (full objects), newest first."""
+    out: list[dict[str, Any]] = []
+    try:
+        for fn in os.listdir(SESSIONS_DIR):
+            if not fn.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(SESSIONS_DIR, fn), encoding="utf-8") as fh:
+                    out.append(json.load(fh))
+            except (OSError, ValueError):
+                pass
+    except OSError:
+        pass
+    out.sort(key=lambda s: s.get("updatedAt", 0), reverse=True)
+    return jsonify({"sessions": out})
+
+
+@app.post("/api/sessions")
+def api_sessions_save() -> Response:
+    """Create/replace one session (the browser mirrors each turn here)."""
+    data = request.get_json(silent=True) or {}
+    p = _session_file(str(data.get("id") or ""))
+    if not p:
+        return jsonify({"error": "Invalid or missing session id."}), 400
+    blob = json.dumps(data)
+    if len(blob) > _SESSION_MAX_BYTES:
+        return jsonify({"error": "Session too large."}), 413
+    try:
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(blob)
+    except OSError as exc:
+        return jsonify({"error": str(exc)}), 500
+    return jsonify({"ok": True, "id": data.get("id")})
+
+
+@app.delete("/api/sessions/<sid>")
+def api_sessions_delete(sid: str) -> Response:
+    p = _session_file(sid)
+    if not p:
+        return jsonify({"error": "Invalid session id."}), 400
+    try:
+        if os.path.isfile(p):
+            os.remove(p)
+    except OSError as exc:
+        return jsonify({"error": str(exc)}), 500
+    return jsonify({"ok": True})
+
+
 if __name__ == "__main__":
     import atexit
     import signal
