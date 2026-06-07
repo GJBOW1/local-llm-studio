@@ -14,6 +14,8 @@
   const LS_THEME_KEY = "lls.theme";
   const LS_FONT_KEY = "lls.fontScale";
   const TITLE_MAX = 40;
+  const PREFERRED_LOCAL_MODEL = "gemma3:12b-it-qat";
+  const REPLACED_LOCAL_MODELS = new Set(["gemma4:latest", "gemma4:e2b", "gemma4:12b"]);
 
   // Where the lifecycle supervisor lives (empty if run without the launcher).
   const CONTROL_URL = (
@@ -288,6 +290,17 @@
     el.modelPicker.appendChild(opt);
   }
 
+  function chooseInitialModel(models, saved) {
+    const installed = new Set(models.map((m) => m.name));
+    if (saved && installed.has(saved)) {
+      return REPLACED_LOCAL_MODELS.has(saved) && installed.has(PREFERRED_LOCAL_MODEL)
+        ? PREFERRED_LOCAL_MODEL
+        : saved;
+    }
+    if (saved && saved in cloudModels) return saved;
+    return installed.has(PREFERRED_LOCAL_MODEL) ? PREFERRED_LOCAL_MODEL : (models[0]?.name || "");
+  }
+
   async function loadModels() {
     try {
       const res = await fetch("/api/models");
@@ -314,8 +327,10 @@
       appendCloudOptions(); // add the ☁ Cloud group (if any providers connected)
 
       const saved = localStorage.getItem(LS_MODEL_KEY);
-      if (saved && (models.some((m) => m.name === saved) || saved in cloudModels)) {
-        el.modelPicker.value = saved;
+      const selected = chooseInitialModel(models, saved);
+      if (selected) {
+        el.modelPicker.value = selected;
+        if (selected !== saved) localStorage.setItem(LS_MODEL_KEY, selected);
       }
       refreshCapBadges(); // show the selected model's capability chips
       refreshContextWindow(); // size the context meter to the selected model

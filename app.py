@@ -884,6 +884,28 @@ def capabilities() -> Response:
     })
 
 
+_TOOLS_CACHE: dict[str, bool] = {}
+
+
+def _model_supports_tools(model: str) -> bool:
+    """Whether a local model can tool-call (Ollama 'tools' capability), cached.
+    Models like gemma3 lack it; sending tools makes Ollama 400 with 'does not
+    support tools', so the chat path must check before using the tool loop."""
+    if model in _TOOLS_CACHE:
+        return _TOOLS_CACHE[model]
+    supported = False
+    try:
+        resp = requests.post(
+            f"{OLLAMA_HOST}/api/show", json={"model": model}, timeout=REQUEST_TIMEOUT
+        )
+        resp.raise_for_status()
+        supported = "tools" in (resp.json().get("capabilities") or [])
+    except (requests.RequestException, ValueError):
+        supported = False
+    _TOOLS_CACHE[model] = supported
+    return supported
+
+
 def _effective_num_ctx(model: str) -> int:
     """The context window we ask Ollama to use for a model: its trained max, capped."""
     ctx = _CTX_CACHE.get(model, 0)
@@ -2020,7 +2042,7 @@ def chat() -> Response:
             }}) + "\n").encode("utf-8")
         if is_cloud:
             yield from _stream_cloud(provider, model, messages, options, tools)
-        elif tools:
+        elif tools and _model_supports_tools(model):
             yield from _chat_with_tools(model, messages, options, think, tools)
         else:
             yield from _stream_chat(body)
