@@ -400,6 +400,39 @@
     renderTelemetry();
   }
 
+  // ---------- Knowledge graph + RAG sources (real data, honest empty-states) ----------
+  function renderGraph() {
+    var body = $("graphBody"); if (!body) return;
+    Promise.all([
+      fetch("/api/graph").then(function (r) { return r.json(); }).catch(function () { return { nodes: [], links: [] }; }),
+      fetch("/api/secondbrain/health").then(function (r) { return r.json(); }).catch(function () { return {}; })
+    ]).then(function (res) {
+      var g = res[0] || {}, h = res[1] || {}, nodes = g.nodes || [];
+      var health = '<div class="insp-card"><h5>Index health</h5>' +
+        '<div class="metric-row"><span class="mlabel">Notes indexed</span><span class="mval">' + (h.notes || 0) + '</span></div>' +
+        '<div class="metric-row"><span class="mlabel">Embedding model</span><span class="mval">' + (h.model || "—") + '</span></div>' +
+        '<div class="metric-row"><span class="mlabel">Status</span><span class="mval">' + (h.available ? "ready" : "not set up") + '</span></div></div>';
+      if (!nodes.length) {
+        body.innerHTML = '<div class="insp-card"><h5>Knowledge graph</h5><p style="font-size:12px;color:var(--muted);line-height:1.55;margin:2px 0 0">No second brain yet. Index notes or documents and this map shows how they connect.</p></div>' + health;
+        return;
+      }
+      var N = Math.min(nodes.length, 16), cx = 140, cy = 120, R = 84, pos = {};
+      nodes.slice(0, N).forEach(function (n, i) { var a = i / N * 2 * Math.PI; var id = n.id != null ? n.id : (n.name || i); pos[id] = { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), label: String(n.label || n.name || id).slice(0, 10) }; });
+      var lines = "", circles = "";
+      (g.links || []).forEach(function (l) { var s = pos[l.source], t = pos[l.target]; if (s && t) lines += '<line x1="' + s.x.toFixed(0) + '" y1="' + s.y.toFixed(0) + '" x2="' + t.x.toFixed(0) + '" y2="' + t.y.toFixed(0) + '"/>'; });
+      Object.keys(pos).forEach(function (k) { var p = pos[k]; circles += '<circle cx="' + p.x.toFixed(0) + '" cy="' + p.y.toFixed(0) + '" r="11" fill="var(--base-2)" stroke="var(--accent)" stroke-width="1.3"/><text x="' + p.x.toFixed(0) + '" y="' + (p.y + 22).toFixed(0) + '" text-anchor="middle" font-size="9" fill="var(--text-2)" font-family="Geist">' + p.label + '</text>'; });
+      body.innerHTML = '<svg class="kgraph" viewBox="0 0 280 240"><g stroke="var(--accent)" stroke-opacity=".34" stroke-width="1">' + lines + '</g><g>' + circles + '</g></svg>' + health;
+    });
+  }
+  function renderSources() {
+    var body = $("sourcesBody"); if (!body) return;
+    if (state.lastSources && state.lastSources.length) {
+      body.innerHTML = state.lastSources.map(function (s) { return '<div class="src"><div class="sname">' + (s.name || "source") + '<span class="sscore">' + (s.score || "") + '</span></div><div class="ssnip">' + (s.snippet || "") + '</div></div>'; }).join("");
+    } else {
+      body.innerHTML = '<div class="insp-card"><h5>Retrieved sources</h5><p style="font-size:12px;color:var(--muted);line-height:1.55;margin:2px 0 0">When your second brain is set up and a reply draws on your notes, the source passages it used appear here.</p></div>';
+    }
+  }
+
   // ---------- Arena: add models via provider dropdowns; close unloads from Ollama; broadcast races ----------
   state.arena = [];
   function arenaProviderGroups() {
@@ -524,6 +557,7 @@
     renderArenaCards();
     renderTelemetry();
     setInterval(function () { var ap = $("app"); if (document.visibilityState === "visible" && ap && ap.classList.contains("show-inspector")) renderTelemetry(); }, 5000);
+    document.querySelectorAll(".insp-tab").forEach(function (t) { t.addEventListener("click", function () { var p = t.dataset.tab; if (p === "graph") renderGraph(); else if (p === "sources") renderSources(); else renderTelemetry(); }); });
     var topTitle = document.querySelector(".topttl .t");
     if (topTitle) { topTitle.title = "Double-click to rename"; topTitle.style.cursor = "text"; topTitle.addEventListener("dblclick", function () { if (state.activeId) editTitle(topTitle, state.activeId); }); }
     wireAgentToggle("tgWrites", "/api/agent/writes", "enabled");
