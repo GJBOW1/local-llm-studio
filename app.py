@@ -847,6 +847,22 @@ def ps() -> Response:
     return jsonify({"models": out})
 
 
+@app.post("/api/stop")
+def api_stop() -> Response:
+    """Unload a local model from Ollama immediately (free its RAM/VRAM). Used by the
+    Arena's close button so removing a racer also stops it running."""
+    data: dict[str, Any] = request.get_json(silent=True) or {}
+    model = str(data.get("model", "")).strip()
+    if not model:
+        return jsonify({"ok": False, "error": "model required"}), 400
+    try:
+        # Ollama unloads a model when handed keep_alive: 0 with no work to do.
+        requests.post(f"{OLLAMA_HOST}/api/generate", json={"model": model, "keep_alive": 0}, timeout=REQUEST_TIMEOUT)
+        return jsonify({"ok": True})
+    except requests.RequestException as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @app.get("/api/models")
 def models() -> Response:
     """The curated local models (grouped by provider), each flagged 'installed'

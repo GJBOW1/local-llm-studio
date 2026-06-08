@@ -61,7 +61,7 @@
       if (saved && state.models.some(function (m) { return m.name === saved && m.installed; })) state.model = saved;
       else if (installed.length) state.model = installed[0].name;
       else if (state.models.length) state.model = state.models[0].name;
-      renderModelMenu(); updateModelBtn(); renderCloud();
+      renderModelMenu(); updateModelBtn(); renderCloud(); renderArenaPicker();
     });
   }
   function updateModelBtn() {
@@ -361,6 +361,113 @@
     });
   }
 
+  // ---------- Arena: add models via provider dropdowns; close unloads from Ollama; broadcast races ----------
+  state.arena = [];
+  function arenaProviderGroups() {
+    var groups = [], local = {};
+    state.models.forEach(function (m) { (local[m.group || "Local"] = local[m.group || "Local"] || []).push({ name: m.name, provider: "", installed: m.installed, size: m.size }); });
+    Object.keys(local).forEach(function (g) { groups.push({ label: g, items: local[g] }); });
+    ["anthropic", "openai", "gemini", "grok"].forEach(function (p) {
+      var info = state.cloud[p]; if (!info || !(info.models || []).length) return;
+      groups.push({ label: (PROV_META[p] || { name: p }).name, items: info.models.map(function (id) { return { name: id, provider: p }; }) });
+    });
+    return groups;
+  }
+  function closeArenaPills() { document.querySelectorAll("#arenaPicker .arena-pill.open").forEach(function (p) { p.classList.remove("open"); var m = p.querySelector(".arena-pill-menu"); if (m) m.hidden = true; }); }
+  function renderArenaPicker() {
+    var box = $("arenaPicker"); if (!box) return;
+    box.innerHTML = "";
+    arenaProviderGroups().forEach(function (g) {
+      var pill = document.createElement("div"); pill.className = "arena-pill";
+      var btn = document.createElement("button"); btn.className = "arena-pill-btn";
+      btn.innerHTML = '<span class="pdot" style="background:' + colorFor(g.items[0] ? g.items[0].name : g.label) + '"></span>' + g.label + ' <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>';
+      var menu = document.createElement("div"); menu.className = "arena-pill-menu"; menu.hidden = true;
+      g.items.forEach(function (it) {
+        var row = document.createElement("div"); row.className = "mp-row";
+        var tail = it.provider ? '<span class="mp-sz">☁</span>' : (it.installed ? "" : '<span class="mp-sz" style="color:var(--accent)">⬇</span>');
+        row.innerHTML = '<span class="mp-dot" style="background:' + colorFor(it.name) + '"></span><span class="mp-n">' + it.name + '</span>' + tail;
+        row.addEventListener("click", function () { addArenaModel(it.name, it.provider, it.installed); closeArenaPills(); });
+        menu.appendChild(row);
+      });
+      btn.addEventListener("click", function (e) { e.stopPropagation(); var willOpen = !pill.classList.contains("open"); closeArenaPills(); if (willOpen) { pill.classList.add("open"); menu.hidden = false; } });
+      pill.appendChild(btn); pill.appendChild(menu); box.appendChild(pill);
+    });
+  }
+  function addArenaModel(name, provider, installed) {
+    if (!provider && installed === false) startPull(name); // download the local model first
+    state.arena.push({ name: name, provider: provider || "" });
+    renderArenaCards();
+    window.showToast && window.showToast("Added " + name.split(":")[0] + " to the race");
+  }
+  function closeArenaModel(i) {
+    var m = state.arena[i]; if (!m) return;
+    state.arena.splice(i, 1); renderArenaCards();
+    if (!m.provider) {
+      fetch("/api/stop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: m.name }) })
+        .then(function () { window.showToast && window.showToast(m.name.split(":")[0] + " closed · unloaded from Ollama"); }).catch(function () {});
+    } else { window.showToast && window.showToast("Removed " + m.name.split(":")[0]); }
+  }
+  function renderArenaCards() {
+    var grid = $("arenaGrid"); if (!grid) return;
+    var n = state.arena.length;
+    grid.className = "arena-grid cols-" + Math.min(Math.max(n, 1), 3);
+    grid.innerHTML = "";
+    if (!n) { grid.innerHTML = '<div class="arena-empty">No models in the race yet.<br>Add some from the provider menus above, then Broadcast a prompt.</div>'; return; }
+    state.arena.forEach(function (m, i) {
+      var col = colorFor(m.name);
+      var c = document.createElement("div"); c.className = "arena-card glass"; c.style.setProperty("--mc", col);
+      var head = document.createElement("div"); head.className = "arena-card-head";
+      head.innerHTML = '<span class="ach-model"><span class="ac-dot" style="background:' + col + '"></span><span class="mname-t">' + m.name + '</span>' + (m.provider ? '<span class="ach-cloud">☁</span>' : '') + '</span>';
+      var close = document.createElement("button"); close.className = "arena-close"; close.title = m.provider ? "Remove from race" : "Close & unload from Ollama"; close.textContent = "✕";
+      close.addEventListener("click", function () { closeArenaModel(i); });
+      head.appendChild(close);
+      c.appendChild(head);
+      c.insertAdjacentHTML("beforeend", '<div class="lane"><div class="lane-fill" style="width:0%;background:' + col + '"></div></div><div class="arena-out arena-out-idle">idle — broadcast a prompt</div><div class="arena-foot">' + (m.provider ? "cloud · " + m.provider : "local") + '</div>');
+      grid.appendChild(c);
+    });
+  }
+  function broadcastArena() {
+    var promptEl = $("arenaPrompt"), prompt = (promptEl && promptEl.value || "").trim();
+    if (!prompt) { promptEl && promptEl.focus(); return; }
+    if (!state.arena.length) { window.showToast && window.showToast("Add models to the race first"); return; }
+    var cards = document.querySelectorAll("#arenaGrid .arena-card");
+    var finishOrder = [];
+    state.arena.forEach(function (m, i) {
+      var card = cards[i]; if (!card) return;
+      var out = card.querySelector(".arena-out"), fill = card.querySelector(".lane-fill"), foot = card.querySelector(".arena-foot");
+      card.classList.remove("win"); out.textContent = ""; out.classList.remove("arena-out-idle"); foot.textContent = "running…";
+      var acc = "", t0 = Date.now();
+      function wc() { return acc.trim() ? acc.trim().split(/\s+/).length : 0; }
+      var payload = { model: m.name, messages: [{ role: "user", content: prompt }], options: {} };
+      if (m.provider) payload.provider = m.provider;
+      fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+        .then(function (res) {
+          var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
+          function pump() {
+            return reader.read().then(function (r) {
+              if (r.done) {
+                var s = (Date.now() - t0) / 1000;
+                foot.textContent = "✓ " + s.toFixed(1) + "s · " + wc() + " words · " + (wc() / Math.max(s, 0.1)).toFixed(0) + " w/s";
+                fill.style.width = "100%";
+                if (acc.trim()) { finishOrder.push(i); if (finishOrder.length === 1) { card.classList.add("win"); } }
+                return;
+              }
+              buf += dec.decode(r.value, { stream: true });
+              var lines = buf.split("\n"); buf = lines.pop();
+              lines.forEach(function (line) {
+                if (!line.trim()) return; var o; try { o = JSON.parse(line); } catch (e) { return; }
+                if (o.error) { out.textContent = "⚠ " + o.error; foot.textContent = "error"; return; }
+                var msg = o.message || {};
+                if (msg.content) { acc += msg.content; out.textContent = acc; var s = (Date.now() - t0) / 1000; foot.textContent = (wc() / Math.max(s, 0.1)).toFixed(0) + " w/s"; fill.style.width = Math.min(96, 8 + acc.length / 6) + "%"; }
+              });
+              return pump();
+            });
+          }
+          return pump();
+        }).catch(function (e) { if (e.name !== "AbortError") { out.textContent = "⚠ request failed"; foot.textContent = "error"; } });
+    });
+  }
+
   // ---------- init ----------
   function init() {
     var inputEl = $("input"), sendBtn = $("send");
@@ -372,6 +479,10 @@
     if ($("newChat")) $("newChat").addEventListener("click", newChat);
     if ($("convoSearch")) $("convoSearch").addEventListener("input", renderConvos);
     if ($("filesToggle")) $("filesToggle").addEventListener("click", loadFiles);
+    if ($("arenaBroadcast")) $("arenaBroadcast").addEventListener("click", broadcastArena);
+    if ($("arenaPrompt")) $("arenaPrompt").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); broadcastArena(); } });
+    document.addEventListener("mousedown", function (e) { if (!e.target.closest(".arena-pill")) closeArenaPills(); });
+    renderArenaCards();
     var topTitle = document.querySelector(".topttl .t");
     if (topTitle) { topTitle.title = "Double-click to rename"; topTitle.style.cursor = "text"; topTitle.addEventListener("dblclick", function () { if (state.activeId) editTitle(topTitle, state.activeId); }); }
     wireAgentToggle("tgWrites", "/api/agent/writes", "enabled");

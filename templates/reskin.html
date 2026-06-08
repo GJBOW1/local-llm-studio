@@ -145,61 +145,19 @@
         <div class="arena-top">
           <div class="arena-title">
             <div class="arena-badge-lg"><svg viewBox="0 0 24 24" fill="none" stroke="#0a1020" stroke-width="2.2" stroke-linecap="round"><path d="M4 5v14M10 5v14M16 5v14M20 5v14"/></svg></div>
-            <div><div class="at-h">Model Arena</div><div class="at-s">Race local models side by side · the rainbow pane holds the pen</div></div>
+            <div><div class="at-h">Model Arena</div><div class="at-s">Add models from any provider, then broadcast one prompt to race them</div></div>
           </div>
-          <div class="arena-picker">
-            <button class="arena-chip on" style="--mc:#9bb5e8"><span class="ac-dot" style="background:#9bb5e8"></span>gemma4:12b-it-qat</button>
-            <button class="arena-chip on" style="--mc:#e25ad0"><span class="ac-dot" style="background:#e25ad0"></span>qwen3:14b</button>
-            <button class="arena-chip on" style="--mc:#b9e84a"><span class="ac-dot" style="background:#b9e84a"></span>llama3.3:70b</button>
-            <button class="arena-chip" style="--mc:#67d68a"><span class="ac-dot" style="background:#67d68a"></span>deepseek-r1:14b</button>
-          </div>
+          <div class="arena-picker" id="arenaPicker"></div>
         </div>
 
         <div class="arena-promptbar glass">
           <span class="ap-label">Shared prompt</span>
-          <input class="ap-input" value="Write a haiku about local inference." />
-          <button class="crossbtn" title="Share each model's answer with the others, then have them reconsider"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"/></svg>Cross-pollinate</button>
-          <button class="ap-cast"><svg viewBox="0 0 24 24" fill="none" stroke="#0a1020" stroke-width="2.2" stroke-linecap="round"><path d="M3 11l18-7-7 18-3-7-8-4z"/></svg>Broadcast</button>
+          <input class="ap-input" id="arenaPrompt" placeholder="Broadcast a prompt to every model in the race…" />
+          <button class="ap-cast" id="arenaBroadcast"><svg viewBox="0 0 24 24" fill="none" stroke="#0a1020" stroke-width="2.2" stroke-linecap="round"><path d="M3 11l18-7-7 18-3-7-8-4z"/></svg>Broadcast</button>
         </div>
 
         <div class="arena-body">
-          <div class="arena-grid cols-2">
-            <div class="arena-card glass win" style="--mc:#9bb5e8">
-              <div class="arena-card-head"><span class="ach-model"><span class="ac-dot" style="background:#9bb5e8"></span>gemma4:12b-it-qat</span><span class="ach-rank" style="color:#9bb5e8">👑 1st</span></div>
-              <div class="lane"><div class="lane-fill" style="width:100%;background:#9bb5e8"></div><div class="lane-puck" style="left:calc(100% - 7px);background:#9bb5e8;box-shadow:0 0 12px #9bb5e8"></div></div>
-              <div class="arena-out">Silent on my Mac /<br>tokens bloom without the cloud /<br>private thoughts, my own.</div>
-              <div class="arena-foot">✓ 1.2s · 312 tokens · 86 t/s avg</div>
-            </div>
-            <div class="arena-card glass" style="--mc:#e25ad0">
-              <div class="arena-card-head"><span class="ach-model"><span class="ac-dot" style="background:#e25ad0"></span>qwen3:14b</span><span class="ach-tps">67 t/s</span></div>
-              <div class="lane"><div class="lane-fill" style="width:74%;background:#e25ad0"></div><div class="lane-puck" style="left:74%;background:#e25ad0;box-shadow:0 0 12px #e25ad0"></div></div>
-              <div class="arena-out">No servers humming— /<br>just my laptop, warm and close<span class="cursor"></span></div>
-              <div class="arena-foot">running locally</div>
-            </div>
-            <div class="arena-card glass" style="--mc:#b9e84a">
-              <div class="arena-card-head"><span class="ach-model"><span class="ac-dot" style="background:#b9e84a"></span>llama3.3:70b</span><span class="ach-tps">41 t/s</span></div>
-              <div class="lane"><div class="lane-fill" style="width:52%;background:#b9e84a"></div><div class="lane-puck" style="left:52%;background:#b9e84a;box-shadow:0 0 12px #b9e84a"></div></div>
-              <div class="arena-out">My machine alone /<br>thinks in quiet<span class="cursor"></span></div>
-              <div class="arena-foot">running locally</div>
-            </div>
-          </div>
-
-          <!-- The pen / shared-document: every racing model reads it; the rainbow pane edits it. -->
-          <aside class="docpane held" id="docPane" style="--pen:#9bb5e8">
-            <div class="docpane-head">
-              <span class="docpane-title">draft-haikus.md</span>
-              <span class="pen-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18z"/></svg>gemma4 holds the pen</span>
-            </div>
-            <div class="docpane-body" id="docBody">
-              <h3>Shared haiku draft</h3>
-              <p>Silent on my Mac /<br>tokens bloom without the cloud /<br>private thoughts, my own.</p>
-              <p style="color:var(--muted);font-size:12px">Every racing model can <b>read</b> this document; only the rainbow-selected pane can <b>edit</b> it. Select a different model to hand the pen over — the glow follows it.</p>
-            </div>
-            <div class="docpane-foot">
-              <button class="pen-take"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/></svg>Take the pen</button>
-              <button class="pen-save">Save</button>
-            </div>
-          </aside>
+          <div class="arena-grid" id="arenaGrid"></div>
         </div>
       </section>
     </main>
@@ -386,8 +344,7 @@
     window.showToast = function (msg) { var t = document.getElementById('toast'); document.getElementById('toastMsg').textContent = msg || 'Done'; t.classList.add('show'); setTimeout(function () { t.classList.remove('show'); }, 1900); };
     document.querySelectorAll('.ccopy, .ma, .diff-ok, .pen-save').forEach(function (b) { b.addEventListener('click', function () { window.showToast(b.classList.contains('diff-ok') ? 'Change applied · checkpoint saved' : b.classList.contains('pen-save') ? 'Document saved' : 'Copied to clipboard'); }); });
     document.querySelectorAll('#viewSeg button').forEach(function (b) { b.addEventListener('click', function () { document.querySelectorAll('#viewSeg button').forEach(function (x) { x.classList.remove('on'); }); b.classList.add('on'); var arena = b.dataset.view === 'arena'; document.getElementById('chatView').hidden = arena; document.getElementById('arenaView').hidden = !arena; if (arena) { app.classList.remove('show-inspector', 'show-files'); } else { app.classList.add('show-inspector'); } syncPanelBtns(); }); });
-    // Pen demo: clicking an arena card hands the pen to that model (glow follows --mc).
-    document.querySelectorAll('.arena-card').forEach(function (c) { c.addEventListener('click', function () { var pane = document.getElementById('docPane'); if (!pane) return; var mc = c.style.getPropertyValue('--mc'); pane.style.setProperty('--pen', mc); var nm = c.querySelector('.ach-model').textContent.trim().split(':')[0]; pane.querySelector('.pen-chip').lastChild.textContent = ' ' + nm + ' holds the pen'; document.getElementById('docBody').classList.add('doc-shimmer'); setTimeout(function(){document.getElementById('docBody').classList.remove('doc-shimmer');}, 1200); }); });
+    // (Arena model management + race is wired in reskin.js.)
     var inp = document.getElementById('input'), bar = document.getElementById('inputbar');
     inp.addEventListener('focus', function () { bar.classList.add('focus'); });
     inp.addEventListener('blur', function () { bar.classList.remove('focus'); });

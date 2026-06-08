@@ -525,3 +525,23 @@ button { font-family: inherit; }
 .crossbtn { display: inline-flex; align-items: center; gap: 7px; padding: 8px 13px; border-radius: 980px; font-size: 12.5px; cursor: pointer; background: var(--glass-2); border: 1px solid var(--glass-brd-2); color: var(--text-2); transition: all .2s; }
 .crossbtn:hover { color: var(--text); border-color: var(--accent); }
 .crossbtn svg { width: 14px; height: 14px; }
+
+/* ---------- Arena: provider-grouped "add model" dropdowns + dynamic race cards ---------- */
+.arena-picker { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.arena-pill { position: relative; }
+.arena-pill-btn { display: inline-flex; align-items: center; gap: 7px; padding: 8px 13px; border-radius: 980px; font-size: 12.5px; font-weight: 500; cursor: pointer; background: var(--glass-2); border: 1px solid var(--glass-brd-2); color: var(--text-2); transition: all .2s; }
+.arena-pill-btn:hover { color: var(--text); border-color: var(--accent); }
+.arena-pill.open .arena-pill-btn { color: var(--text); border-color: var(--accent); box-shadow: 0 0 0 3px var(--soft); }
+.arena-pill-btn .pdot { width: 8px; height: 8px; border-radius: 3px; flex-shrink: 0; }
+.arena-pill-btn .chev { width: 12px; height: 12px; color: var(--muted); transition: transform .2s; }
+.arena-pill.open .arena-pill-btn .chev { transform: rotate(180deg); }
+.arena-pill-menu { position: absolute; top: calc(100% + 7px); left: 0; min-width: 240px; max-height: 340px; overflow-y: auto; z-index: 60; padding: 6px; border-radius: var(--r-md); background: var(--glass-strong); backdrop-filter: blur(28px) saturate(180%); -webkit-backdrop-filter: blur(28px) saturate(180%); border: 1px solid var(--glass-brd-2); box-shadow: var(--shadow), inset 0 1px 0 var(--glass-hi); animation: pop .2s cubic-bezier(.2,1.1,.3,1) both; }
+.arena-pill-menu .mp-row .mp-sz { font-size: 10.5px; margin-left: auto; }
+.arena-empty { grid-column: 1 / -1; text-align: center; color: var(--muted); font-size: 13.5px; line-height: 1.6; padding: 46px 24px; border: 1px dashed var(--glass-brd-2); border-radius: var(--r-md); }
+.arena-grid.cols-1 { grid-template-columns: minmax(0, 560px); }
+.arena-close { width: 24px; height: 24px; border-radius: 7px; border: 1px solid var(--glass-brd-2); background: var(--glass-2); color: var(--muted); cursor: pointer; display: grid; place-items: center; flex-shrink: 0; font-size: 11px; line-height: 1; transition: color .18s, border-color .18s, background .18s; }
+.arena-close:hover { color: var(--rose); border-color: var(--rose); background: rgba(255,138,107,.12); }
+.arena-card-head .ach-model { min-width: 0; overflow: hidden; }
+.arena-card-head .ach-model .mname-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ach-cloud { font-size: 11px; opacity: .85; flex-shrink: 0; }
+.arena-out { white-space: pre-wrap; }
