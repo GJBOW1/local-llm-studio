@@ -18,13 +18,20 @@
   var LS_MODEL = "lls.model.v2", LS_CONVOS = "lls.conversations";
 
   // ---------- markdown (minimal, safe) ----------
+  var ARTIFACT_TYPES = { mermaid: 1, chart: 1, svg: 1, html: 1, embed: 1 };
   function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
   function renderMd(text) {
     var out = "", parts = text.split(/```/);
     for (var i = 0; i < parts.length; i++) {
       if (i % 2 === 1) {
-        var seg = parts[i], nl = seg.indexOf("\n"), lang = nl > 0 ? seg.slice(0, nl).trim() : "", body = nl >= 0 ? seg.slice(nl + 1) : seg;
-        out += '<div class="codeblock"><div class="cbar"><span class="clang">' + esc(lang || "code") + '</span><button class="ccopy">Copy</button></div><pre>' + esc(body.replace(/\n$/, "")) + "</pre></div>";
+        var seg = parts[i], nl = seg.indexOf("\n"), lang = (nl >= 0 ? seg.slice(0, nl).trim() : "").toLowerCase(), body = (nl >= 0 ? seg.slice(nl + 1) : seg).replace(/\n$/, "");
+        if (ARTIFACT_TYPES[lang]) {
+          // A fenced diagram/chart/svg/html block. Emit an unrendered artifact holder;
+          // renderArtifacts() builds the live view once the message is complete.
+          out += '<div class="artifact" data-type="' + lang + '" data-rendered="0"><pre class="artifact-src">' + esc(body) + '</pre></div>';
+        } else {
+          out += '<div class="codeblock"><div class="cbar"><span class="clang">' + esc(lang || "code") + '</span><button class="ccopy">Copy</button></div><pre>' + esc(body) + "</pre></div>";
+        }
       } else {
         var t = esc(parts[i]);
         t = t.replace(/`([^`]+)`/g, '<code class="inl">$1</code>').replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
@@ -33,6 +40,58 @@
       }
     }
     return out;
+  }
+
+  // ---------- artifacts (mermaid / chart / svg / html / embed) ----------
+  var _mermaidInit = false;
+  function buildArtifactView(type, source) {
+    var view = document.createElement("div"); view.className = "artifact-view";
+    if (type === "mermaid") {
+      if (typeof window.mermaid === "undefined") { view.textContent = source; return Promise.resolve(view); }
+      if (!_mermaidInit) { try { window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "default" }); } catch (e) {} _mermaidInit = true; }
+      state._artSeq = (state._artSeq || 0) + 1;
+      var id = "mmd-" + state._artSeq;
+      return window.mermaid.render(id, source).then(function (out) { view.innerHTML = out.svg; return view; }).catch(function (err) { view.className = "artifact-view artifact-error"; view.textContent = "Diagram error: " + (err && err.message ? err.message : String(err)); return view; });
+    }
+    if (type === "chart") {
+      var config;
+      try { config = JSON.parse(source); } catch (e) { view.className = "artifact-view artifact-error"; view.textContent = "Chart config isn't valid JSON: " + e.message; return Promise.resolve(view); }
+      if (typeof window.Chart === "undefined") { view.textContent = source; return Promise.resolve(view); }
+      config.options = Object.assign({ responsive: true, maintainAspectRatio: false }, config.options || {});
+      var wrap = document.createElement("div"); wrap.className = "chart-wrap"; var canvas = document.createElement("canvas"); wrap.appendChild(canvas); view.appendChild(wrap);
+      requestAnimationFrame(function () { try { new window.Chart(canvas.getContext("2d"), config); } catch (err) { view.className = "artifact-view artifact-error"; view.textContent = "Chart error: " + err.message; } });
+      return Promise.resolve(view);
+    }
+    if (type === "embed") {
+      var src = source.trim().split("\n")[0].trim();
+      var isPath = !/^https?:\/\//i.test(src) && src.charAt(0) !== "/";
+      var url = isPath ? "/local?path=" + encodeURIComponent(src) : src;
+      var low = src.toLowerCase().split("?")[0], node;
+      if (/\.(png|jpe?g|gif|webp|bmp|avif|svg)$/.test(low)) { node = document.createElement("img"); node.className = "embed-media"; node.src = url; node.alt = src; }
+      else if (/\.(mp4|webm|ogg|mov|m4v)$/.test(low)) { node = document.createElement("video"); node.className = "embed-media"; node.controls = true; node.src = url; }
+      else if (/\.(mp3|wav|m4a|aac|oga|opus|flac)$/.test(low)) { node = document.createElement("audio"); node.className = "embed-media"; node.controls = true; node.src = url; }
+      else { node = document.createElement("iframe"); node.className = "artifact-frame"; node.src = url; node.setAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-forms"); }
+      view.appendChild(node); return Promise.resolve(view);
+    }
+    var frame = document.createElement("iframe"); frame.className = "artifact-frame";
+    if (type === "svg") { frame.setAttribute("sandbox", ""); frame.srcdoc = '<!doctype html><meta charset="utf-8"><body style="margin:0;display:flex;justify-content:center;align-items:flex-start;background:#fff">' + source + "</body>"; }
+    else { frame.setAttribute("sandbox", "allow-scripts"); frame.srcdoc = source; }
+    view.appendChild(frame); return Promise.resolve(view);
+  }
+  function renderArtifacts(container) {
+    if (!container) return;
+    container.querySelectorAll('.artifact[data-rendered="0"]').forEach(function (block) {
+      block.dataset.rendered = "1";
+      var type = block.dataset.type, srcEl = block.querySelector(".artifact-src"), source = srcEl ? srcEl.textContent : "";
+      if (!source.trim()) return;
+      var bar = document.createElement("div"); bar.className = "artifact-bar";
+      bar.innerHTML = '<span class="art-type">' + esc(type) + '</span><button class="art-toggle" type="button">&lt;/&gt; source</button>';
+      Promise.resolve(buildArtifactView(type, source)).then(function (viewEl) {
+        block.insertBefore(viewEl, srcEl); block.insertBefore(bar, viewEl);
+        srcEl.classList.add("artifact-src-hidden");
+        bar.querySelector(".art-toggle").addEventListener("click", function () { srcEl.classList.toggle("artifact-src-hidden"); });
+      });
+    });
   }
 
   // ---------- health ----------
@@ -258,7 +317,7 @@
     state.activeId = id; state.messages = (c.messages || []).map(function (m) { return { role: m.role, content: m.content }; });
     if (c.model) { state.model = c.model; updateModelBtn(); }
     var t = transcriptEl(); t.innerHTML = "";
-    state.messages.forEach(function (m) { var b = addBubble(m.role, c.model); b.innerHTML = renderMd(m.content); });
+    state.messages.forEach(function (m) { var b = addBubble(m.role, c.model); b.innerHTML = renderMd(m.content); if (m.role !== "user") renderArtifacts(b); });
     var tt = document.querySelector(".topttl .t"); if (tt) tt.textContent = c.title || "Chat";
     renderConvos();
   }
@@ -296,7 +355,7 @@
             return pump();
           });
         }
-        function finishStream() { body.parentElement.classList.remove("cursor"); state.messages.push({ role: "assistant", content: acc }); setStreaming(false); persist(); recordTps(acc.trim() ? acc.trim().split(/\s+/).length : 0, _tFirst ? Math.max(_tLast - _tFirst, 100) : 0); }
+        function finishStream() { body.parentElement.classList.remove("cursor"); body.innerHTML = renderMd(acc); renderArtifacts(body); state.messages.push({ role: "assistant", content: acc }); setStreaming(false); persist(); recordTps(acc.trim() ? acc.trim().split(/\s+/).length : 0, _tFirst ? Math.max(_tLast - _tFirst, 100) : 0); }
         return pump();
       }).catch(function (e) { body.parentElement.classList.remove("cursor"); if (e.name !== "AbortError") body.innerHTML = renderMd(acc + "\n\n_stream failed_"); setStreaming(false); });
   }
@@ -539,7 +598,7 @@
         var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
         function pump() {
           return reader.read().then(function (r) {
-            if (r.done) { m.busy = false; if (fill) fill.style.width = "100%"; setRate(); renderArenaConvo(id); return; }
+            if (r.done) { m.busy = false; if (fill) fill.style.width = "100%"; setRate(); renderArenaConvo(id); var cv = card && card.querySelector(".arena-convo"); if (cv) renderArtifacts(cv); return; }
             buf += dec.decode(r.value, { stream: true });
             var lines = buf.split("\n"); buf = lines.pop();
             lines.forEach(function (line) {

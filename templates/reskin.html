@@ -315,6 +315,8 @@
     inp.addEventListener('blur', function () { bar.classList.remove('focus'); });
     document.getElementById('tempSlider').addEventListener('input', function (e) { document.getElementById('tempVal').textContent = e.target.value; });
   </script>
+  <script src="{{ url_for('static', filename='vendor/mermaid.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
   <script src="{{ url_for('static', filename='reskin.js') }}?v={{ asset_v }}"></script>
 </body>
 </html>
