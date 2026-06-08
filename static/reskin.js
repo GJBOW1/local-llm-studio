@@ -794,19 +794,47 @@
     }
     var goal = ($("arenaPrompt").value || "").trim();
     if (!goal) { window.showToast && window.showToast("Type the document goal in the shared prompt"); $("arenaPrompt").focus(); return; }
-    // Collaborate = Broadcast, but each model is told to work together to edit the open
-    // document and is handed the edit_document tool (the pen, for everyone, this turn).
-    var preamble =
-      "You're collaborating with the other AI models on the document open in the viewer — its current text is shown in your context.\n" +
-      "Work WITH them to carry out the user's request below by editing the document directly with the edit_document tool. " +
-      "Make surgical edits, build on changes the others have already made, and don't undo good work. " +
-      "If the request is already fully satisfied, say so instead of editing.\n\n" +
-      "USER'S REQUEST: " + goal;
-    state.collabAll = true;
-    state.arena.forEach(function (m) { m.messages.push({ role: "user", content: preamble }); streamArena(m.id); });
-    state.collabAll = false;
+    // Round-based collaboration on the user's request: every round, all models VOTE +
+    // propose; the group rotates the pen to ONE model, which makes the single edit; repeat
+    // until everyone votes done. Only the pen-holder can edit in a given round, so the
+    // models coordinate instead of all editing at once.
     if ($("arenaPrompt")) $("arenaPrompt").value = "";
-    window.showToast && window.showToast("Collaborating on " + state.doc.name + "…");
+    _collabOn = true; var btn = $("arenaCollab"); if (btn) btn.classList.add("on");
+    var history = [], lastHolder = null, MAX = 8;
+    function finish(msg) { _collabOn = false; if (btn) btn.classList.remove("on"); window.showToast && window.showToast("Collaboration finished — " + msg); }
+    function round(n) {
+      if (n > MAX) return finish("reached the round limit.");
+      state.penHolder = null;   // nobody holds the pen while the group is voting/proposing
+      var hist = history.length ? "What the group has done so far:\n" + history.slice(-6).join("\n") + "\n\n" : "";
+      var prompt =
+        "You and the other AI models are collaborating on the document open in the viewer (its current text is in your context). Carry out the user's request below by taking turns editing it — only ONE model edits per round, so this round just PROPOSE and vote; don't edit yet.\n\n" +
+        "  ▶ USER'S REQUEST: " + goal + "\n\n" + hist +
+        "If another edit is still needed to satisfy the request, propose ONE specific edit; if it's already fully satisfied, vote done.\n\n" +
+        "Reply in EXACTLY this format and nothing else:\n" +
+        "NEXT: edit   (or)   NEXT: done\n" +
+        "CHANGE: (only when NEXT is edit) the single edit — the exact existing text to find and what to replace it with, or \"APPEND: <new text>\"\n" +
+        "WHY: one sentence on how this serves the user's request";
+      var label = 'Round ' + n + ' · vote + propose for your request: "' + goal + '"';
+      Promise.all(state.arena.map(function (it) {
+        return askOne(it, prompt, label).then(function (t) { return { it: it, p: parseProposal(t) }; });
+      })).then(function (results) {
+        var votes = results.map(function (r) { return r.it.name.split(":")[0] + ": " + (r.p.decision === "EDIT" ? "edit" : "done"); });
+        results.forEach(function (r) { history.push(r.it.name.split(":")[0] + ": " + r.p.decision + " — " + r.p.reason); });
+        var editors = results.filter(function (r) { return r.p.decision === "EDIT" && r.p.edit; });
+        if (!editors.length) return finish("all models voted the request is done.");
+        var pick = editors.filter(function (r) { return r.it.id !== lastHolder; })[0] || editors[0];   // rotate the pen
+        lastHolder = pick.it.id; setPen(pick.it.id);   // exactly one model gets the edit tool this round
+        var ep =
+          'The group voted (' + votes.join(", ") + '). You hold the pen this round — make this ONE edit with the edit_document tool to serve the user\'s request ("' + goal + '"), then confirm in one short line:\n\n' + pick.p.edit +
+          "\n\nRules: exactly ONE edit_document call; `find` must be text that exists verbatim in the document; put only real document text into `find`/`replace` — never labels like 'CHANGE:', 'APPEND:', 'FIND:'; preserve everything else.";
+        askOne(pick.it, ep, "✒ " + pick.it.name.split(":")[0] + " holds the pen this round").then(function () {
+          history.push("✒ " + pick.it.name.split(":")[0] + " edited: " + pick.p.reason);
+          loadDoc(); setTimeout(function () { round(n + 1); }, 500);
+        });
+      });
+    }
+    window.showToast && window.showToast("Models are collaborating on " + state.doc.name + " — taking turns…");
+    round(1);
   }
 
   // ---------- MCP servers (Settings → Tools): connect tools for every model ----------
