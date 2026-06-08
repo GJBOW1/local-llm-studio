@@ -647,6 +647,14 @@
       if (!d.indexing && state._sbPoll) { clearInterval(state._sbPoll); state._sbPoll = null; if (d.notes) window.showToast && window.showToast("Vault indexed · " + d.notes + " notes"); }
     }).catch(function () {});
   }
+  function browseVault() {
+    var btn = $("sbBrowse"), old = btn.textContent; btn.disabled = true; btn.textContent = "…";
+    fetch("/api/secondbrain/browse", { method: "POST" }).then(function (r) { return r.json(); }).then(function (d) {
+      btn.disabled = false; btn.textContent = old;
+      if (d.ok && d.path) { $("sbVault").value = d.path; window.showToast && window.showToast("Selected — now click Connect & index"); }
+      else if (d.error) { window.showToast && window.showToast(d.error); }
+    }).catch(function () { btn.disabled = false; btn.textContent = old; });
+  }
   function connectVault() {
     var vaultEl = $("sbVault"), vault = (vaultEl.value || "").trim();
     if (!vault) { vaultEl.focus(); return; }
@@ -673,6 +681,7 @@
     if ($("arenaBroadcast")) $("arenaBroadcast").addEventListener("click", broadcastArena);
     if ($("arenaCross")) $("arenaCross").addEventListener("click", crossPollinate);
     if ($("sbConnect")) $("sbConnect").addEventListener("click", connectVault);
+    if ($("sbBrowse")) $("sbBrowse").addEventListener("click", browseVault);
     if ($("openSettings")) $("openSettings").addEventListener("click", renderSecondBrain);
     renderSecondBrain();
     if ($("arenaPrompt")) $("arenaPrompt").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); broadcastArena(); } });

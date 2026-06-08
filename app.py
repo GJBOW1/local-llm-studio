@@ -860,6 +860,24 @@ def api_secondbrain_connect() -> Response:
     return jsonify({"ok": True, "vault": vault, "notes_found": md_count, "indexing": True})
 
 
+@app.post("/api/secondbrain/browse")
+def api_secondbrain_browse() -> Response:
+    """Pop a native folder picker so the user chooses their vault visually instead of
+    typing a path. macOS only; elsewhere the UI falls back to the text field."""
+    if sys.platform != "darwin":
+        return jsonify({"ok": False, "error": "Use the path field on this platform."})
+    try:
+        proc = subprocess.run(
+            ["osascript", "-e", 'POSIX path of (choose folder with prompt "Choose your Obsidian vault")'],
+            capture_output=True, text=True, timeout=300,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        return jsonify({"ok": False, "error": f"Folder picker unavailable: {exc}"})
+    if proc.returncode != 0:  # user pressed Cancel
+        return jsonify({"ok": False, "cancelled": True})
+    return jsonify({"ok": True, "path": proc.stdout.strip().rstrip("/")})
+
+
 _TEXT_EXTS = frozenset({
     ".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".log", ".rtf",
     ".py", ".js", ".ts", ".html", ".css", ".yaml", ".yml", ".xml",
