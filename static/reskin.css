@@ -77,6 +77,7 @@ body {
 }
 ::selection { background: var(--soft); }
 button { font-family: inherit; }
+[hidden] { display: none !important; }  /* beat display:flex on toggled views/menus */
 
 /* ---------- Watery animated background ---------- */
 .aqua { position: fixed; inset: 0; z-index: -2; overflow: hidden; background: var(--base); }
@@ -176,9 +177,11 @@ button { font-family: inherit; }
 .icon-btn:active { transform: scale(.92); }
 .icon-btn.on { background: var(--soft); color: var(--accent); border-color: var(--glass-brd-2); }
 .icon-btn svg { width: 18px; height: 18px; }
-.topttl { display: flex; flex-direction: column; min-width: 0; margin-right: auto; }
+.topttl { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; overflow: hidden; margin-right: 6px; }
 .topttl .t { font-size: 14.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.2px; }
-.topttl .s { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; margin-top: 1px; white-space: nowrap; }
+.topttl .s { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; margin-top: 1px; min-width: 0; }
+.topttl .s .statusdot { flex-shrink: 0; }
+.topttl .s .stxt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .statusdot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 rgba(110,231,160,.5); animation: spulse 2.6s infinite; }
 @keyframes spulse { 0%{box-shadow:0 0 0 0 rgba(110,231,160,.5)} 70%{box-shadow:0 0 0 6px rgba(110,231,160,0)} 100%{box-shadow:0 0 0 0 rgba(110,231,160,0)} }
 
@@ -486,3 +489,36 @@ button { font-family: inherit; }
   .app.collapsed .side { transform: translateX(-110%); width: 270px; opacity: 0; }
   .bubble-wrap { max-width: 86%; }
 }
+
+/* ---------- View switching (chat vs arena) ---------- */
+.chatview { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.arena-body { display: flex; gap: 14px; flex: 1; min-height: 0; }
+.arena-body .arena-grid { flex: 1; align-content: start; min-width: 0; }
+
+/* ---------- Pen / shared-document collaboration (designed into the glass language) ----------
+   The pane is "held" by the rainbow-selected model; --pen carries that model's color so the
+   glow + left border show, at a glance, which model owns the document. */
+.docpane { width: 320px; flex: 0 0 auto; border-radius: var(--r-md); display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  border: 1px solid var(--glass-brd-2); background: var(--glass); box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow-sm);
+  border-left: 3px solid var(--pen, var(--accent)); transition: box-shadow .4s, border-color .4s;
+  animation: panelin .4s cubic-bezier(.3,1,.4,1) both; }
+.docpane.held { box-shadow: 0 0 0 1px var(--pen), 0 18px 50px -18px color-mix(in srgb, var(--pen) 45%, transparent), inset 0 1px 0 var(--glass-hi); }
+.docpane-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--glass-brd-2); }
+.docpane-title { font-family: var(--serif); font-size: 16px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pen-chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10.5px; padding: 4px 9px; border-radius: 980px; color: var(--pen); background: color-mix(in srgb, var(--pen) 14%, transparent); border: 1px solid color-mix(in srgb, var(--pen) 35%, transparent); white-space: nowrap; flex-shrink: 0; }
+.pen-chip svg { width: 11px; height: 11px; }
+.docpane-body { flex: 1; overflow-y: auto; padding: 14px; font-size: 13.5px; line-height: 1.6; color: var(--text-2); min-height: 0; }
+.docpane-body h3 { font-size: 14.5px; color: var(--text); margin: 0 0 8px; }
+.docpane-body.editing { padding: 0; }
+.docpane-body textarea { width: 100%; height: 100%; min-height: 240px; background: var(--code-bg); border: none; resize: none; color: var(--text); font-family: var(--mono); font-size: 12.5px; line-height: 1.6; padding: 14px; }
+.docpane-body textarea:focus { outline: none; }
+.doc-shimmer { animation: docwrite 1.2s ease; }
+@keyframes docwrite { 0% { box-shadow: inset 0 0 0 100vmax color-mix(in srgb, var(--pen) 12%, transparent); } 100% { box-shadow: inset 0 0 0 100vmax transparent; } }
+.docpane-foot { display: flex; align-items: center; gap: 9px; padding: 11px 14px; border-top: 1px solid var(--glass-brd-2); }
+.pen-take { display: inline-flex; align-items: center; gap: 6px; background: var(--glass-2); border: 1px solid var(--glass-brd-2); color: var(--text); border-radius: 10px; padding: 8px 13px; font-size: 12.5px; cursor: pointer; transition: border-color .2s; }
+.pen-take:hover { border-color: var(--pen); }
+.pen-take svg { width: 13px; height: 13px; }
+.pen-save { background: linear-gradient(145deg, var(--accent), var(--accent-2)); color: #0a1020; border: none; border-radius: 10px; padding: 8px 15px; font-size: 12.5px; font-weight: 600; cursor: pointer; margin-left: auto; box-shadow: 0 6px 16px -8px rgba(111,143,207,.7); }
+.crossbtn { display: inline-flex; align-items: center; gap: 7px; padding: 8px 13px; border-radius: 980px; font-size: 12.5px; cursor: pointer; background: var(--glass-2); border: 1px solid var(--glass-brd-2); color: var(--text-2); transition: all .2s; }
+.crossbtn:hover { color: var(--text); border-color: var(--accent); }
+.crossbtn svg { width: 14px; height: 14px; }
