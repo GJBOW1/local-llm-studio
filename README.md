@@ -16,9 +16,9 @@ Race local and cloud models side‑by‑side, ground every answer in your own no
 
 ### 🎬 Watch the demo
 
-https://github.com/Panic-In-The-Distro/local-llm-studio/raw/main/docs/demo/local-llm-studio-notebooklm-brief.mp4
+<a href="https://github.com/Panic-In-The-Distro/local-llm-studio/raw/main/docs/demo/local-llm-studio-notebooklm-brief.mp4"><img src="docs/demo/video-poster.png" alt="Watch the narrated demo" width="720"></a>
 
-<sub>▶️ Narrated overview ·  if the player doesn't load, [download the MP4](docs/demo/local-llm-studio-notebooklm-brief.mp4) or watch the [quick screenshot tour](docs/demo/local-llm-studio-demo.mp4).</sub>
+<sub>▶️ A 1:42 narrated overview (click to play) · or the [quick screenshot tour](docs/demo/local-llm-studio-demo.mp4)</sub>
 
 </div>
 
