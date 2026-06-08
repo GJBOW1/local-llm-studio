@@ -27,7 +27,10 @@ datas = [
 
 hiddenimports = (
     collect_submodules("flask")
-    + ["requests", "mcp_bridge", "app", "supervisor", "ollama_runtime"]
+    + collect_submodules("lxml")
+    + collect_submodules("PIL")
+    + ["requests", "mcp_bridge", "app", "supervisor", "ollama_runtime",
+       "mammoth", "docx", "pptx", "openpyxl", "et_xmlfile", "xlsxwriter"]
 )
 
 # Optional app icon (only if present, else PyInstaller errors on a missing path).

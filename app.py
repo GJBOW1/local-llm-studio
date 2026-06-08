@@ -22,6 +22,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
+# --- Vendored dependencies: run from source with zero pip installs. When not frozen,
+# prefer ./vendor (Flask, requests, lxml, python-docx/pptx, openpyxl, mammoth, …) so the
+# app is fully self-contained. PyInstaller bundles its own copies, so skip when frozen.
+if not getattr(sys, "frozen", False):
+    _VENDOR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")
+    if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
+        sys.path.insert(0, _VENDOR)
+
 import requests
 from flask import Flask, Response, jsonify, render_template, request, send_file
 

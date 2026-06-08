@@ -1,12 +1,18 @@
 # Local LLM Studio — runtime dependencies.
 # (mcp_bridge is a local module, not a package.)
+#
+# NOTE: these are ALSO vendored into ./vendor (committed to the repo) so the app runs
+# from source with ZERO pip installs — app.py adds ./vendor to sys.path when not frozen.
+# This file stays the source of truth for the PyInstaller build and for re-vendoring:
+#   pip install --target ./vendor --no-compile -r requirements.txt
 Flask>=3.0,<3.1
 requests>=2.31,<3
+
 # Document preview (docx/pptx/xlsx → HTML for the viewer):
 mammoth>=1.6
+python-docx>=1.1
 python-pptx>=0.6
 openpyxl>=3.0
-
 
 # Build-only (installed by CI / build scripts, not needed at runtime):
 #   pyinstaller>=6.6
