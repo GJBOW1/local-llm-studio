@@ -557,14 +557,20 @@ def _asset_version() -> str:
 
 @app.get("/")
 def index() -> str:
-    """Serve the single-page chat UI."""
-    return render_template("index.html", control_url=CONTROL_URL, asset_v=_asset_version())
+    """Serve the glassy reskin — the default UI (promoted from /v2)."""
+    return render_template("reskin.html", control_url=CONTROL_URL, asset_v=_asset_version())
 
 
 @app.get("/v2")
 def index_v2() -> str:
-    """Serve the glassy reskin (work-in-progress; promoted to / when complete)."""
+    """Alias for the reskin (kept so existing links / bookmarks still work)."""
     return render_template("reskin.html", control_url=CONTROL_URL, asset_v=_asset_version())
+
+
+@app.get("/classic")
+def index_classic() -> str:
+    """The original pre-reskin UI, kept as a fallback."""
+    return render_template("index.html", control_url=CONTROL_URL, asset_v=_asset_version())
 
 
 @app.get("/favicon.ico")
