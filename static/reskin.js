@@ -741,11 +741,11 @@
     });
   }
   function parseProposal(text) {
-    function grab(key) { var m = text.match(new RegExp(key + "\\s*:\\s*([\\s\\S]*?)(?:\\n[A-Z][A-Z ]{2,}:|$)", "i")); return m ? m[1].trim() : ""; }
-    var dRaw = grab("DECISION"), edit = grab("EDIT");
-    var hasEdit = !!edit && !/^(none|n\/a|no\b|nothing)/i.test(edit);
-    var decision = (/\bdone\b/i.test(dRaw) && !/\bedit\b/i.test(dRaw)) ? "DONE" : (hasEdit || /edit/i.test(dRaw) ? "EDIT" : "DONE");
-    return { decision: decision, volunteer: /yes/i.test(grab("VOLUNTEER")), edit: edit, reason: grab("REASON") || "(no reason given)" };
+    function grab(key) { var m = text.match(new RegExp(key + "\\s*:\\s*([\\s\\S]*?)(?:\\n[A-Z][A-Z _]{2,}:|$)", "i")); return m ? m[1].trim() : ""; }
+    var next = grab("NEXT"), change = grab("CHANGE");
+    var hasChange = !!change && !/^(none|n\/a|no\b|nothing)/i.test(change);
+    var decision = (/\bdone\b/i.test(next) && !/\bedit\b/i.test(next)) ? "DONE" : (hasChange || /edit/i.test(next) ? "EDIT" : "DONE");
+    return { decision: decision, edit: change, reason: grab("WHY") || "(no reason given)" };
   }
   var _collabOn = false;
   function autoCollaborate() {
@@ -771,24 +771,30 @@
     function finish(msg) { _collabOn = false; if (btn) { btn.classList.remove("on"); btn.disabled = false; } setPen(state.penHolder); window.showToast && window.showToast("Collaboration finished — " + msg); }
     function round(n) {
       if (n > MAX) return finish("reached the round limit; document saved.");
-      var hist = history.length ? history.slice(-6).join("\n") : "(nothing yet)";
+      var hist = history.length ? "What the group has done so far:\n" + history.slice(-6).join("\n") + "\n\n" : "";
       var prompt =
-        "You and the other AI models are collaborating to improve the shared document (shown in your context) toward this goal:\n" +
-        "GOAL: " + goal + "\n\nCollaboration so far:\n" + hist + "\n\n" +
-        "Decide whether the document needs another edit to meet the goal. Reply in EXACTLY this format and nothing else:\n" +
-        "DECISION: EDIT or DONE\nVOLUNTEER: yes or no\nEDIT: <if EDIT: the ONE specific change — quote the exact existing text to find and its replacement, or 'APPEND: <text>'>\nREASON: <one short sentence>";
+        "The user gave you and the other AI models THIS instruction for the open document:\n\n" +
+        "  ▶ USER'S INSTRUCTION: " + goal + "\n\n" +
+        "Your job is to carry out the user's instruction by collaboratively editing the document (its current text is shown in your context). " + hist +
+        "Look at the current document. If another edit is still needed to fully satisfy the user's instruction, propose ONE specific edit; if it's already fully satisfied, say done.\n\n" +
+        "Reply in exactly this format and nothing else:\n" +
+        "NEXT: edit   (or)   NEXT: done\n" +
+        "CHANGE: (only when NEXT is edit) the single edit — the exact existing text to find and what to replace it with, or \"APPEND: <new text>\"\n" +
+        "WHY: one sentence on how this advances the user's instruction";
+      var label = 'Round ' + n + ' · carrying out your instruction: "' + goal + '"';
       Promise.all(state.arena.map(function (it) {
-        return askOne(it, prompt, "Round " + n + ": review the document and propose an edit (or vote it's done) toward — " + goal).then(function (t) { return { it: it, p: parseProposal(t) }; });
+        return askOne(it, prompt, label).then(function (t) { return { it: it, p: parseProposal(t) }; });
       })).then(function (results) {
         results.forEach(function (r) { history.push(r.it.name.split(":")[0] + ": " + r.p.decision + " — " + r.p.reason); });
         var editors = results.filter(function (r) { return r.p.decision === "EDIT" && r.p.edit; });
-        if (!editors.length) return finish("the group agrees the document is done.");
-        var vols = editors.filter(function (r) { return r.p.volunteer; }); var pool = vols.length ? vols : editors;
-        var pick = pool.filter(function (r) { return r.it.id !== lastHolder; })[0] || pool[0];
+        if (!editors.length) return finish("the group agrees your instruction is fully done.");
+        var pick = editors.filter(function (r) { return r.it.id !== lastHolder; })[0] || editors[0];   // rotate the pen
         lastHolder = pick.it.id; setPen(pick.it.id);
-        var ep = "The group chose you to hold the pen this round. Using the edit_document tool, make this single improvement to the shared document, then confirm in one short line:\n" + pick.p.edit + "\nRules: make exactly ONE surgical edit_document call; `find` must be text that exists verbatim in the document; pass only real document text to `find`/`replace` — never put labels like 'REPLACE:', 'EDIT:', 'APPEND:', or 'FIND:' into the content; preserve the rest of the document.";
-        askOne(pick.it, ep, "✒ Holds the pen — applying: " + pick.p.reason).then(function () {
-          history.push("✒ " + pick.it.name.split(":")[0] + " edited the document (" + pick.p.reason + ")");
+        var ep =
+          'You hold the pen. Make this ONE edit with the edit_document tool to advance the user\'s instruction ("' + goal + '"), then confirm in one short line:\n\n' + pick.p.edit +
+          "\n\nRules: exactly ONE edit_document call; `find` must be text that exists verbatim in the document; put only real document text into `find`/`replace` — never labels like 'CHANGE:', 'APPEND:', or 'FIND:'; preserve everything else.";
+        askOne(pick.it, ep, "✒ " + pick.it.name.split(":")[0] + " takes the pen — editing toward your instruction").then(function () {
+          history.push("✒ " + pick.it.name.split(":")[0] + " edited: " + pick.p.reason);
           loadDoc(); setTimeout(function () { round(n + 1); }, 500);
         });
       });

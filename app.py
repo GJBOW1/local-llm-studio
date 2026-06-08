@@ -708,11 +708,15 @@ def _asset_version() -> str:
     """Max mtime of the front-end assets, appended as ?v= so the browser always
     fetches fresh JS/CSS the moment a file changes — no hard-reload needed."""
     sdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-    files = ["app.js", "style.css", "markdown.js", os.path.join("vendor", "highlight-mini.js")]
-    try:
-        return str(int(max(os.path.getmtime(os.path.join(sdir, f)) for f in files)))
-    except OSError:
-        return "1"
+    # The glass UI (reskin.*) is the live app — track it FIRST so edits bust the cache.
+    files = ["reskin.js", "reskin.css", "app.js", "style.css", "markdown.js", os.path.join("vendor", "highlight-mini.js")]
+    mtimes = []
+    for f in files:
+        try:
+            mtimes.append(os.path.getmtime(os.path.join(sdir, f)))
+        except OSError:
+            pass
+    return str(int(max(mtimes))) if mtimes else "1"
 
 
 @app.get("/")
