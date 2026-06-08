@@ -6,6 +6,12 @@
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
   var MODEL_COLORS = ["#9bb5e8", "#e25ad0", "#b9e84a", "#4dd6e6", "#ff8a6b", "#b69ef0", "#67d68a", "#f0c674"];
+  var PROV_META = {
+    anthropic: { name: "Anthropic", sub: "Claude", logo: "C", color: "#d97757", ph: "sk-ant-…" },
+    openai: { name: "OpenAI", sub: "GPT", logo: "◎", color: "#10a37f", ph: "sk-…" },
+    gemini: { name: "Google", sub: "Gemini", logo: "G", color: "#4285f4", ph: "AIza…" },
+    grok: { name: "xAI", sub: "Grok", logo: "x", color: "#0b0b0b", ph: "xai-…" }
+  };
   function colorFor(name) { var h = 0; for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0; return MODEL_COLORS[h % MODEL_COLORS.length]; }
 
   var state = { model: "", models: [], cloud: {}, convos: [], activeId: null, messages: [], streaming: false, controller: null };
@@ -53,7 +59,7 @@
       if (saved && state.models.some(function (m) { return m.name === saved && m.installed; })) state.model = saved;
       else if (installed.length) state.model = installed[0].name;
       else if (state.models.length) state.model = state.models[0].name;
-      renderModelMenu(); updateModelBtn();
+      renderModelMenu(); updateModelBtn(); renderCloud();
     });
   }
   function updateModelBtn() {
@@ -93,6 +99,40 @@
       });
       return r;
     }
+  }
+
+  // ---------- cloud providers (settings) ----------
+  function renderCloud() {
+    var box = $("cloudProviders"); if (!box) return;
+    box.innerHTML = "";
+    var order = ["anthropic", "openai", "gemini", "grok"];
+    order.forEach(function (p) {
+      var info = state.cloud[p]; if (!info && !PROV_META[p]) return;
+      var meta = PROV_META[p] || { name: p, sub: "", logo: p[0].toUpperCase(), color: "#666", ph: "API key…" };
+      var connected = info && info.connected;
+      var card = document.createElement("div"); card.className = "cloudp";
+      card.innerHTML =
+        '<div class="cloudp-top"><span class="cloudp-lg" style="background:' + meta.color + '">' + meta.logo + '</span>' +
+        '<span class="cloudp-name">' + meta.name + '<small>' + meta.sub + '</small></span>' +
+        '<span class="cloudp-stat' + (connected ? ' connected' : '') + '">' + (connected ? 'connected' : 'not connected') + '</span></div>' +
+        '<div class="cloudp-row"><input type="password" placeholder="' + meta.ph + '"><button class="cloudp-btn">' + (connected ? 'Disconnect' : 'Connect') + '</button></div>';
+      var input = card.querySelector("input"), btn = card.querySelector(".cloudp-btn");
+      btn.addEventListener("click", function () {
+        if (connected) {
+          fetch("/api/providers/disconnect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider: p }) })
+            .then(function () { window.showToast && window.showToast(meta.name + " disconnected"); loadModels(); }).catch(function () {});
+        } else {
+          var key = (input.value || "").trim(); if (!key) { input.focus(); return; }
+          btn.textContent = "…"; btn.disabled = true;
+          fetch("/api/providers/connect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider: p, key: key }) })
+            .then(function (r) { return r.json(); }).then(function (d) {
+              if (d && d.ok) { window.showToast && window.showToast(meta.name + " connected"); loadModels(); }
+              else { window.showToast && window.showToast((d && d.error) || "Invalid key"); btn.textContent = "Connect"; btn.disabled = false; }
+            }).catch(function () { btn.textContent = "Connect"; btn.disabled = false; });
+        }
+      });
+      box.appendChild(card);
+    });
   }
 
   // ---------- auto-download ----------
@@ -145,14 +185,34 @@
       var b = dayBucket(c.updatedAt);
       if (b !== lastBucket) { lastBucket = b; var dg = document.createElement("div"); dg.className = "daygroup"; dg.textContent = b; list.appendChild(dg); }
       var row = document.createElement("div"); row.className = "convo" + (c.id === state.activeId ? " on" : "");
-      row.innerHTML = '<span class="ci"></span><div class="cmain"><div class="ctitle"></div></div><button class="cdel" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12"/></svg></button>';
-      row.querySelector(".ctitle").textContent = c.title || "New chat";
+      row.innerHTML = '<span class="ci"></span><div class="cmain"><div class="ctitle" title="Double-click to rename"></div></div><button class="cren" title="Rename"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button><button class="cdel" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12"/></svg></button>';
+      var titleEl = row.querySelector(".ctitle");
+      titleEl.textContent = c.title || "New chat";
       row.querySelector(".ci").style.background = colorFor(c.model || state.model);
-      row.addEventListener("click", function (e) { if (e.target.closest(".cdel")) { e.stopPropagation(); deleteConvo(c.id); return; } openConvo(c.id); });
+      titleEl.addEventListener("dblclick", function (e) { e.stopPropagation(); editTitle(titleEl, c.id); });
+      row.querySelector(".cren").addEventListener("click", function (e) { e.stopPropagation(); editTitle(titleEl, c.id); });
+      row.addEventListener("click", function (e) { if (e.target.closest(".cdel")) { e.stopPropagation(); deleteConvo(c.id); return; } if (e.target.closest(".cren") || titleEl.isContentEditable) return; openConvo(c.id); });
       list.appendChild(row);
     });
   }
   function deleteConvo(id) { state.convos = state.convos.filter(function (c) { return c.id !== id; }); saveConvos(state.convos); fetch("/api/sessions/" + encodeURIComponent(id), { method: "DELETE" }).catch(function () {}); if (id === state.activeId) newChat(); else renderConvos(); }
+  function editTitle(el, id) {
+    var orig = el.textContent;
+    el.contentEditable = "true"; el.classList.add("editing"); el.focus();
+    var r = document.createRange(); r.selectNodeContents(el); var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    function done(save) { el.removeEventListener("keydown", onKey); el.removeEventListener("blur", onBlur); el.contentEditable = "false"; el.classList.remove("editing"); if (save) renameConvo(id, el.textContent); else el.textContent = orig; }
+    function onKey(e) { if (e.key === "Enter") { e.preventDefault(); done(true); } else if (e.key === "Escape") { e.preventDefault(); done(false); } }
+    function onBlur() { done(true); }
+    el.addEventListener("keydown", onKey); el.addEventListener("blur", onBlur);
+  }
+  function renameConvo(id, title) {
+    title = (title || "").replace(/\s+/g, " ").trim(); if (!title) { renderConvos(); return; }
+    var c = state.convos.find(function (x) { return x.id === id; }); if (!c) return;
+    c.title = title; saveConvos(state.convos); renderConvos();
+    if (id === state.activeId) { var tt = document.querySelector(".topttl .t"); if (tt) tt.textContent = title; }
+    fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(c) }).catch(function () {});
+    window.showToast && window.showToast("Chat renamed");
+  }
   function backfillSessions() {
     return fetch("/api/sessions").then(function (r) { return r.json(); }).then(function (d) {
       var server = d.sessions || []; var byId = {}; state.convos.forEach(function (c) { byId[c.id] = c; });
@@ -307,6 +367,8 @@
     if ($("newChat")) $("newChat").addEventListener("click", newChat);
     if ($("convoSearch")) $("convoSearch").addEventListener("input", renderConvos);
     if ($("filesToggle")) $("filesToggle").addEventListener("click", loadFiles);
+    var topTitle = document.querySelector(".topttl .t");
+    if (topTitle) { topTitle.title = "Double-click to rename"; topTitle.style.cursor = "text"; topTitle.addEventListener("dblclick", function () { if (state.activeId) editTitle(topTitle, state.activeId); }); }
     wireAgentToggle("tgWrites", "/api/agent/writes", "enabled");
     wireAgentToggle("tgApprove", "/api/agent/approval", "required");
 

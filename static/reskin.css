@@ -156,10 +156,13 @@ button { font-family: inherit; }
 .convo .cmain { flex: 1; min-width: 0; }
 .convo .ctitle { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
 .convo.on .ctitle { color: var(--text); font-weight: 500; }
-.convo .cdel { opacity: 0; width: 22px; height: 22px; border-radius: 7px; border: none; background: transparent; color: var(--muted); cursor: pointer; flex-shrink: 0; display: grid; place-items: center; transition: opacity .18s, color .18s, background .18s; }
-.convo:hover .cdel { opacity: 1; }
+.convo .cdel, .convo .cren { opacity: 0; width: 22px; height: 22px; border-radius: 7px; border: none; background: transparent; color: var(--muted); cursor: pointer; flex-shrink: 0; display: grid; place-items: center; transition: opacity .18s, color .18s, background .18s; }
+.convo:hover .cdel, .convo:hover .cren { opacity: 1; }
 .convo .cdel:hover { color: var(--rose); background: rgba(255,138,107,.12); }
-.convo .cdel svg { width: 13px; height: 13px; }
+.convo .cren:hover { color: var(--accent); background: var(--soft); }
+.convo .cdel svg, .convo .cren svg { width: 13px; height: 13px; }
+.ctitle.editing { outline: none; background: var(--glass-2); border: 1px solid var(--accent); border-radius: 6px; padding: 1px 5px; color: var(--text); cursor: text; box-shadow: 0 0 0 3px var(--soft); }
+.topttl .t.editing { outline: none; background: var(--glass-2); border-radius: 6px; padding: 0 6px; box-shadow: 0 0 0 2px var(--soft); }
 
 .side-foot { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--glass-brd-2); }
 .side-foot .uchip { display: flex; align-items: center; gap: 9px; flex: 1; padding: 6px; border-radius: 11px; }
