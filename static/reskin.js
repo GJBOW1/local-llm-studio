@@ -845,34 +845,69 @@
     function finish(msg) { _collabOn = false; if (btn) btn.classList.remove("on"); setCastLabel("Broadcast"); window.showToast && window.showToast("Collaboration finished — " + msg); }
     function round(n) {
       if (n > MAX) return finish("reached the round limit.");
-      state.penHolder = null;   // nobody holds the pen while the group is voting/proposing
+      state.penHolder = null;   // nobody holds the pen while the group proposes + votes
       var hist = history.length ? "What the group has done so far:\n" + history.slice(-6).join("\n") + "\n\n" : "";
       var steer = _steering.length ? "  ▶ THE USER HAS STEERED THE TASK — keep going, but factor in this added guidance / change of direction: " + _steering.join("  |  ") + "\n\n" : "";
-      var prompt =
-        "You and the other AI models are collaborating on the document open in the viewer (its current text is in your context). Carry out the user's request below by taking turns editing it — only ONE model edits per round, so this round just PROPOSE and vote; don't edit yet.\n\n" +
+      // PHASE 1 — every model proposes its single best next edit (or votes the task done).
+      var proposePrompt =
+        "You and the other AI models are collaborating on the document open in the viewer (its current text is in your context). This round, PROPOSE your single best next edit toward the user's request — don't edit yet; the group will then vote on whose proposal is best.\n\n" +
         "  ▶ USER'S REQUEST: " + goal + "\n\n" + steer + hist +
-        "If another edit is still needed to satisfy the request, propose ONE specific edit; if it's already fully satisfied, vote done.\n\n" +
+        "If another edit is still needed, propose ONE specific edit; if the request is already fully satisfied, vote done.\n\n" +
         "Reply in EXACTLY this format and nothing else:\n" +
         "NEXT: edit   (or)   NEXT: done\n" +
         "CHANGE: (only when NEXT is edit) the single edit — the exact existing text to find and what to replace it with, or \"APPEND: <new text>\"\n" +
-        "WHY: one sentence on how this serves the user's request";
-      var label = 'Round ' + n + ' · vote + propose for your request: "' + goal + '"';
+        "WHY: one sentence making the case that your edit is the best next step";
       Promise.all(state.arena.map(function (it) {
-        return askOne(it, prompt, label).then(function (t) { return { it: it, p: parseProposal(t) }; });
+        return askOne(it, proposePrompt, 'Round ' + n + ' · propose your best edit for: "' + goal + '"').then(function (t) { return { it: it, p: parseProposal(t) }; });
       })).then(function (results) {
-        var votes = results.map(function (r) { return r.it.name.split(":")[0] + ": " + (r.p.decision === "EDIT" ? "edit" : "done"); });
-        results.forEach(function (r) { history.push(r.it.name.split(":")[0] + ": " + r.p.decision + " — " + r.p.reason); });
         var editors = results.filter(function (r) { return r.p.decision === "EDIT" && r.p.edit; });
-        if (!editors.length) return finish("all models voted the request is done.");
-        var pick = editors.filter(function (r) { return r.it.id !== lastHolder; })[0] || editors[0];   // rotate the pen
-        lastHolder = pick.it.id; setPen(pick.it.id);   // exactly one model gets the edit tool this round
-        var ep =
-          'The group voted (' + votes.join(", ") + '). You hold the pen this round — make this ONE edit with the edit_document tool to serve the user\'s request ("' + goal + '"), then confirm in one short line:\n\n' + pick.p.edit +
-          "\n\nRules: exactly ONE edit_document call; `find` must be text that exists verbatim in the document; put only real document text into `find`/`replace` — never labels like 'CHANGE:', 'APPEND:', 'FIND:'; preserve everything else.";
-        askOne(pick.it, ep, "✒ " + pick.it.name.split(":")[0] + " holds the pen this round").then(function () {
-          history.push("✒ " + pick.it.name.split(":")[0] + " edited: " + pick.p.reason);
-          loadDoc(); setTimeout(function () { round(n + 1); }, 500);
+        if (!editors.length) {
+          results.forEach(function (r) { history.push(r.it.name.split(":")[0] + ": done"); });
+          return finish("all models voted the request is done.");
+        }
+        if (editors.length === 1) {   // only one proposal — no vote needed
+          history.push(editors[0].it.name.split(":")[0] + " was the only proposer");
+          return doEdit(editors[0], [], n);
+        }
+        // PHASE 2 — share every proposal; each model votes the best + recommends an improvement.
+        var slate = editors.map(function (e, i) { return "[" + (i + 1) + "] " + e.it.name.split(":")[0] + " proposes: " + e.p.edit + "   (why: " + e.p.reason + ")"; }).join("\n");
+        var votePrompt =
+          "The group is collaborating on the open document toward the user's request:\n  ▶ " + goal + "\n\n" +
+          "Here are this round's proposed edits:\n" + slate + "\n\n" +
+          "Judge which proposal BEST advances the request — vote for the strongest one even if it isn't your own. Then give ONE concrete recommendation to make that proposal even better.\n\n" +
+          "Reply in EXACTLY this format:\n" +
+          "BEST: <the number of the best proposal>\n" +
+          "RECOMMENDATION: <one concrete improvement to that proposal, or 'none'>";
+        Promise.all(state.arena.map(function (it) {
+          return askOne(it, votePrompt, "Round " + n + " · vote: whose proposal is best?").then(function (t) {
+            var bm = t.match(/BEST\s*:\s*\[?\s*(\d+)/i), rm = t.match(/RECOMMENDATION\s*:\s*([\s\S]*?)\s*$/i);
+            return { it: it, best: bm ? (parseInt(bm[1], 10) - 1) : -1, rec: rm ? rm[1].trim() : "" };
+          });
+        })).then(function (ballots) {
+          var tally = editors.map(function () { return 0; });
+          ballots.forEach(function (b) { if (b.best >= 0 && b.best < editors.length) tally[b.best]++; });
+          var max = Math.max.apply(null, tally), tied = [];
+          tally.forEach(function (c, i) { if (c === max) tied.push(i); });
+          var widx = tied.filter(function (i) { return editors[i].it.id !== lastHolder; })[0];   // rotate on ties
+          if (widx === undefined) widx = tied[0];
+          var winner = editors[widx];
+          // the LOSERS' recommendations to improve the winning proposal
+          var recs = ballots.filter(function (b) { return b.it.id !== winner.it.id && b.rec && !/^\s*none\b/i.test(b.rec); })
+                            .map(function (b) { return b.it.name.split(":")[0] + ": " + b.rec; });
+          history.push("Vote (" + editors.map(function (e, i) { return e.it.name.split(":")[0] + " " + tally[i]; }).join(", ") + ") → " + winner.it.name.split(":")[0] + " wins the pen");
+          doEdit(winner, recs, n);
         });
+      });
+    }
+    function doEdit(winner, recs, n) {
+      lastHolder = winner.it.id; setPen(winner.it.id);   // the peer-chosen winner gets the edit tool
+      var recBlock = recs.length ? "\n\nThe other models judged your proposal best and offered these improvements — fold in any that genuinely strengthen it:\n- " + recs.join("\n- ") : "";
+      var ep =
+        'The group voted your proposal the best, so you hold the pen this round. Make the edit with the edit_document tool to advance the user\'s request ("' + goal + '"), then confirm in one short line:\n\nYour proposal: ' + winner.p.edit + recBlock +
+        "\n\nRules: exactly ONE edit_document call; `find` must be text that exists verbatim in the document; put only real document text into `find`/`replace` — never labels like 'CHANGE:', 'BEST:', 'RECOMMENDATION:'; preserve everything else.";
+      askOne(winner.it, ep, "✒ " + winner.it.name.split(":")[0] + " won the vote — editing" + (recs.length ? " (folding in the group's tips)" : "")).then(function () {
+        history.push("✒ " + winner.it.name.split(":")[0] + " edited: " + winner.p.reason);
+        loadDoc(); setTimeout(function () { round(n + 1); }, 500);
       });
     }
     window.showToast && window.showToast("Models are collaborating on " + state.doc.name + " — taking turns…");
