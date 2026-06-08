@@ -14,6 +14,8 @@ Race local and cloud models side‑by‑side, ground every answer in your own no
 [![Platform](https://img.shields.io/badge/macOS%20%C2%B7%20Windows-portable-6f8fcf)](#-portable-app)
 ![Offline‑first](https://img.shields.io/badge/Offline‑first-Private%20%C2%B7%20%240-6ee7a0)
 
+**▶️ [Watch the 30‑second demo](docs/demo/local-llm-studio-demo.mp4)**
+
 </div>
 
 ---
