@@ -54,6 +54,8 @@
     ]).then(function (res) {
       state.models = (res[0].models || []);
       state.cloud = res[1] || {};
+      state.modelProvider = {};
+      Object.keys(state.cloud).forEach(function (p) { (state.cloud[p].models || []).forEach(function (id) { state.modelProvider[id] = p; }); });
       var saved = localStorage.getItem(LS_MODEL);
       var installed = state.models.filter(function (m) { return m.installed; });
       if (saved && state.models.some(function (m) { return m.name === saved && m.installed; })) state.model = saved;
@@ -236,7 +238,7 @@
     if (role === "user") av.textContent = "You"; else av.innerHTML = '<svg viewBox="0 0 24 24" fill="none"><path d="M9 8h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-6l-4 3v-3H9a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z" fill="#0a1020" transform="scale(.8) translate(2 2)"/></svg>';
     var wrap = document.createElement("div"); wrap.className = "bubble-wrap";
     var bub = document.createElement("div"); bub.className = "bubble";
-    if (role !== "user") { var br = document.createElement("div"); br.className = "brole"; br.textContent = (model || state.model).split(":")[0] + " · local"; bub.appendChild(br); }
+    if (role !== "user") { var mdl = model || state.model; var br = document.createElement("div"); br.className = "brole"; br.textContent = mdl.split(":")[0] + " · " + ((state.modelProvider || {})[mdl] ? "cloud" : "local"); bub.appendChild(br); }
     var body = document.createElement("div"); body.className = "mbody"; bub.appendChild(body);
     wrap.appendChild(bub); msg.appendChild(av); msg.appendChild(wrap); t.appendChild(msg);
     t.scrollTop = t.scrollHeight;
@@ -274,7 +276,10 @@
     setStreaming(true);
     state.controller = new AbortController();
     var acc = "";
-    fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: state.model, messages: state.messages, options: { temperature: parseFloat(($("tempSlider") || {}).value || "0.7") } }), signal: state.controller.signal })
+    var payload = { model: state.model, messages: state.messages, options: { temperature: parseFloat(($("tempSlider") || {}).value || "0.7") } };
+    var prov = (state.modelProvider || {})[state.model];
+    if (prov) payload.provider = prov; // route cloud models to their provider, not Ollama
+    fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal: state.controller.signal })
       .then(function (res) {
         var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
         function pump() {

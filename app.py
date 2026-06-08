@@ -167,7 +167,7 @@ CURATED_LOCAL: dict[str, list[str]] = {
 CURATED_CLOUD: dict[str, list[str]] = {
     "anthropic": ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
     "openai": ["gpt-5.5", "gpt-5.5-pro", "gpt-5.4-mini"],
-    "gemini": ["gemini-3-pro", "gemini-3-flash", "gemini-2.5-pro"],
+    "gemini": ["gemini-2.5-pro", "gemini-3.5-flash", "gemini-2.5-flash"],
     "grok": ["grok-4.3", "grok-4.20-0309-reasoning", "grok-4.20-multi-agent-0309"],
 }
 # Flat set of every curated local tag, for quick membership tests.
