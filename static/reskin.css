@@ -567,3 +567,10 @@ button { font-family: inherit; }
 .artifact-error { background: rgba(255,138,107,.1); color: var(--rose); font-size: 12.5px; font-family: var(--mono); justify-content: flex-start; white-space: pre-wrap; }
 .artifact-src { margin: 0; padding: 12px 14px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; color: #d6dde6; background: var(--code-bg); white-space: pre; }
 .artifact-src-hidden { display: none; }
+
+/* ---------- Arena: the pen (multi-model single-doc editing) ---------- */
+.arena-pen { width: 24px; height: 24px; border-radius: 7px; border: 1px solid var(--glass-brd-2); background: var(--glass-2); color: var(--muted); cursor: pointer; flex-shrink: 0; font-size: 12px; line-height: 1; display: grid; place-items: center; transition: color .18s, background .18s, border-color .18s; }
+.arena-pen:hover { color: var(--mc); border-color: var(--mc); }
+.arena-pen.on { color: #0a1020; background: var(--mc); border-color: var(--mc); }
+.arena-card.penholder { box-shadow: 0 0 0 1px var(--mc), 0 14px 40px -18px color-mix(in srgb, var(--mc) 45%, transparent), inset 0 1px 0 var(--glass-hi); }
+#arenaDocBtn.on { color: var(--text); border-color: var(--accent); background: var(--soft); }

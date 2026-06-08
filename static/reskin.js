@@ -550,13 +550,14 @@
     if (!n) { grid.innerHTML = '<div class="arena-empty">No models in the arena yet.<br>Add some from the provider menus above, then Broadcast a prompt — or chat each one directly.</div>'; return; }
     state.arena.forEach(function (m) {
       var col = colorFor(m.name);
-      var c = document.createElement("div"); c.className = "arena-card glass"; c.style.setProperty("--mc", col); c.dataset.id = m.id;
+      var c = document.createElement("div"); c.className = "arena-card glass" + (m.id === state.penHolder ? " penholder" : ""); c.style.setProperty("--mc", col); c.dataset.id = m.id;
       c.innerHTML =
-        '<div class="arena-card-head"><span class="ach-model"><span class="ac-dot" style="background:' + col + '"></span><span class="mname-t">' + m.name + '</span>' + (m.provider ? '<span class="ach-cloud">☁</span>' : '') + '</span><span class="ach-meta"></span><button class="arena-close" title="' + (m.provider ? "Remove from arena" : "Close &amp; unload from Ollama") + '">✕</button></div>' +
+        '<div class="arena-card-head"><span class="ach-model"><span class="ac-dot" style="background:' + col + '"></span><span class="mname-t">' + m.name + '</span>' + (m.provider ? '<span class="ach-cloud">☁</span>' : '') + '</span><span class="ach-meta"></span><button class="arena-pen' + (m.id === state.penHolder ? " on" : "") + '" title="Give this model the pen — it can edit the open document">✒</button><button class="arena-close" title="' + (m.provider ? "Remove from arena" : "Close &amp; unload from Ollama") + '">✕</button></div>' +
         '<div class="lane"><div class="lane-fill" style="width:0%;background:' + col + '"></div></div>' +
         '<div class="arena-convo"></div>' +
         '<div class="arena-cinput"><textarea rows="1" placeholder="Ask ' + esc(m.name.split(":")[0]) + '…"></textarea><button class="arena-send" title="Send to this model"><svg viewBox="0 0 24 24" fill="#0a1020"><path d="M3.4 20.4 21 12 3.4 3.6 3.39 10.2 15 12l-11.61 1.8z"/></svg></button></div>';
       c.querySelector(".arena-close").addEventListener("click", function () { closeArenaModel(m.id); });
+      c.querySelector(".arena-pen").addEventListener("click", function () { setPen(m.id); });
       var ta = c.querySelector("textarea"), sb = c.querySelector(".arena-send");
       function doSend() { var v = (ta.value || "").trim(); if (!v) return; ta.value = ""; ta.style.height = ""; sendToArenaModel(m.id, v); }
       sb.addEventListener("click", doSend);
@@ -593,6 +594,7 @@
     function setRate() { if (meta && tLast > tFirst) { var w = assistant.content.trim() ? assistant.content.trim().split(/\s+/).length : 0; meta.textContent = Math.round(w / ((tLast - tFirst) / 1000)) + " w/s"; } }
     var payload = { model: m.name, messages: payloadMsgs, options: {} };
     if (m.provider) payload.provider = m.provider;
+    if (state.penHolder === id && state.doc && state.doc.open && state.doc.editable) payload.can_edit_doc = true;
     fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
       .then(function (res) {
         var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
@@ -603,6 +605,7 @@
             var lines = buf.split("\n"); buf = lines.pop();
             lines.forEach(function (line) {
               if (!line.trim()) return; var o; try { o = JSON.parse(line); } catch (e) { return; }
+              if (o.doc_event) { loadDoc(); return; }
               if (o.error) { assistant.content += "\n\n_" + o.error + "_"; }
               var msg = o.message || {};
               if (msg.content) { if (!tFirst) tFirst = Date.now(); tLast = Date.now(); assistant.content += msg.content; if (fill) fill.style.width = Math.min(96, 8 + assistant.content.length / 6) + "%"; setRate(); renderArenaConvo(id); }
@@ -632,6 +635,46 @@
     });
     window.showToast && window.showToast("Cross-pollinating " + state.arena.length + " models");
   }
+
+  // ---------- Shared document (the pen): every model reads it; the pen-holder edits it ----------
+  function loadDoc() {
+    fetch("/api/doc").then(function (r) { return r.json(); }).then(function (d) { state.doc = d && d.open ? d : null; renderDoc(); }).catch(function () {});
+  }
+  function openDoc() {
+    var btn = $("docOpenBtn"); if (!btn) return; var old = btn.innerHTML; btn.disabled = true; btn.textContent = "…";
+    fetch("/api/doc/browse", { method: "POST" }).then(function (r) { return r.json(); }).then(function (d) {
+      btn.disabled = false; btn.innerHTML = old;
+      if (d.ok) { state.doc = { open: true, name: d.name, content: d.content, editable: d.editable, kind: d.kind }; renderDoc(); window.showToast && window.showToast("Opened " + d.name); }
+      else if (d.error) window.showToast && window.showToast(d.error);
+    }).catch(function () { btn.disabled = false; btn.innerHTML = old; });
+  }
+  function saveDoc() {
+    var ta = document.querySelector("#docBodyEl textarea"); if (!ta || !state.doc) return;
+    fetch("/api/doc/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: ta.value }) })
+      .then(function (r) { return r.json(); }).then(function (d) { if (d.ok) { state.doc.content = ta.value; window.showToast && window.showToast("Document saved"); } else window.showToast && window.showToast(d.error || "Save failed"); });
+  }
+  function setPen(id) { state.penHolder = (state.penHolder === id) ? null : id; renderArenaCards(); renderDoc(); }
+  function renderDoc() {
+    var pane = $("arenaDoc"); if (!pane) return;
+    var nameEl = $("docName"), chip = $("docPenChip"), body = $("docBodyEl");
+    var holder = state.penHolder ? arenaItem(state.penHolder) : null;
+    if (!state.doc || !state.doc.open) {
+      nameEl.textContent = "No document"; chip.hidden = true; pane.classList.remove("held"); pane.style.removeProperty("--pen");
+      body.classList.remove("editing");
+      body.innerHTML = '<div class="arena-out-idle" style="padding:20px">Open a Markdown/text file. Every racing model can read it; give one model the pen (✒ on its card) and it edits the doc when it answers.</div>';
+      return;
+    }
+    nameEl.textContent = state.doc.name;
+    chip.hidden = false;
+    if (holder) { var c = colorFor(holder.name); pane.classList.add("held"); pane.style.setProperty("--pen", c); chip.style.setProperty("--pen", c); chip.textContent = "✒ " + holder.name.split(":")[0] + " holds the pen"; }
+    else { pane.classList.remove("held"); pane.style.removeProperty("--pen"); chip.style.removeProperty("--pen"); chip.textContent = "read-only · ✒ a card to assign the pen"; }
+    if (state.doc.editable) {
+      if (!body.querySelector("textarea")) { body.classList.add("editing"); body.innerHTML = '<textarea spellcheck="false"></textarea>'; }
+      var ta = body.querySelector("textarea");
+      if (document.activeElement !== ta) ta.value = state.doc.content || "";
+    } else { body.classList.remove("editing"); body.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:12.5px">This is a binary/preview file — open a text file to make it editable.</div>'; }
+  }
+  function toggleDoc() { var pane = $("arenaDoc"); if (!pane) return; pane.hidden = !pane.hidden; $("arenaDocBtn") && $("arenaDocBtn").classList.toggle("on", !pane.hidden); if (!pane.hidden) loadDoc(); }
 
   // ---------- Second brain (connect an Obsidian vault from Settings) ----------
   function renderSecondBrain() {
@@ -680,6 +723,9 @@
     if ($("filesToggle")) $("filesToggle").addEventListener("click", loadFiles);
     if ($("arenaBroadcast")) $("arenaBroadcast").addEventListener("click", broadcastArena);
     if ($("arenaCross")) $("arenaCross").addEventListener("click", crossPollinate);
+    if ($("arenaDocBtn")) $("arenaDocBtn").addEventListener("click", toggleDoc);
+    if ($("docOpenBtn")) $("docOpenBtn").addEventListener("click", openDoc);
+    if ($("docSaveBtn")) $("docSaveBtn").addEventListener("click", saveDoc);
     if ($("sbConnect")) $("sbConnect").addEventListener("click", connectVault);
     if ($("sbBrowse")) $("sbBrowse").addEventListener("click", browseVault);
     if ($("openSettings")) $("openSettings").addEventListener("click", renderSecondBrain);
