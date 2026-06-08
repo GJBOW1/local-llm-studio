@@ -676,6 +676,44 @@
   }
   function toggleDoc() { var pane = $("arenaDoc"); if (!pane) return; pane.hidden = !pane.hidden; $("arenaDocBtn") && $("arenaDocBtn").classList.toggle("on", !pane.hidden); if (!pane.hidden) loadDoc(); }
 
+  // ---------- MCP servers (Settings → Tools): connect tools for every model ----------
+  function renderMcp() {
+    var box = $("mcpServers"); if (!box) return;
+    fetch("/api/mcp").then(function (r) { return r.json(); }).then(function (d) {
+      var servers = d.servers || []; box.innerHTML = ""; var connecting = false;
+      if (!servers.length) box.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:0 2px 8px">No MCP servers yet — add one below.</div>';
+      servers.forEach(function (s) {
+        var card = document.createElement("div"); card.className = "cloudp";
+        var statusTxt = s.enabled ? (s.connected ? (s.tools.length + " tool" + (s.tools.length === 1 ? "" : "s")) : "connecting…") : "disabled";
+        if (s.enabled && !s.connected) connecting = true;
+        card.innerHTML =
+          '<div class="cloudp-top"><span class="cloudp-lg" style="background:#67d68a">⚙</span><span class="cloudp-name"></span><span class="' + (s.enabled && s.connected ? "cloudp-stat connected" : "cloudp-stat") + '"></span></div>' +
+          '<div class="cloudp-row" style="justify-content:flex-end;align-items:center"><button class="toggle' + (s.enabled ? " on" : "") + '" title="Enable / disable"></button><button class="cloudp-btn mcp-rm">Remove</button></div>';
+        var nm = card.querySelector(".cloudp-name"); nm.appendChild(document.createTextNode(s.name));
+        var small = document.createElement("small"); small.textContent = (s.command || "") + (s.args && s.args.length ? " " + s.args.join(" ") : ""); nm.appendChild(small);
+        card.querySelector(".cloudp-stat").textContent = statusTxt;
+        card.querySelector(".toggle").addEventListener("click", function () { toggleMcp(s.name, !s.enabled); });
+        card.querySelector(".mcp-rm").addEventListener("click", function () { removeMcp(s.name); });
+        box.appendChild(card);
+      });
+      if (connecting && !state._mcpPoll) state._mcpPoll = setInterval(renderMcp, 2500);
+      if (!connecting && state._mcpPoll) { clearInterval(state._mcpPoll); state._mcpPoll = null; }
+    }).catch(function () {});
+  }
+  function addMcp() {
+    var name = ($("mcpName").value || "").trim(), cmd = ($("mcpCmd").value || "").trim(), args = ($("mcpArgs").value || "").trim();
+    if (!name || !cmd) { window.showToast && window.showToast("Name and command are required"); return; }
+    var btn = $("mcpAdd"); btn.disabled = true; btn.textContent = "…";
+    fetch("/api/mcp/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name, command: cmd, args: args, enabled: true }) })
+      .then(function (r) { return r.json(); }).then(function (d) {
+        btn.disabled = false; btn.textContent = "Add";
+        if (d.ok) { $("mcpName").value = ""; $("mcpCmd").value = ""; $("mcpArgs").value = ""; window.showToast && window.showToast("Added " + name + " — connecting…"); setTimeout(renderMcp, 800); }
+        else window.showToast && window.showToast(d.error || "Couldn't add server");
+      }).catch(function () { btn.disabled = false; btn.textContent = "Add"; });
+  }
+  function toggleMcp(name, enabled) { fetch("/api/mcp/toggle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name, enabled: enabled }) }).then(function () { window.showToast && window.showToast(enabled ? "Enabling…" : "Disabled"); setTimeout(renderMcp, 700); }); }
+  function removeMcp(name) { fetch("/api/mcp/remove", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name }) }).then(function () { window.showToast && window.showToast("Removed " + name); setTimeout(renderMcp, 700); }); }
+
   // ---------- Second brain (connect an Obsidian vault from Settings) ----------
   function renderSecondBrain() {
     var vaultEl = $("sbVault"); if (!vaultEl) return;
@@ -728,8 +766,9 @@
     if ($("docSaveBtn")) $("docSaveBtn").addEventListener("click", saveDoc);
     if ($("sbConnect")) $("sbConnect").addEventListener("click", connectVault);
     if ($("sbBrowse")) $("sbBrowse").addEventListener("click", browseVault);
-    if ($("openSettings")) $("openSettings").addEventListener("click", renderSecondBrain);
-    renderSecondBrain();
+    if ($("mcpAdd")) $("mcpAdd").addEventListener("click", addMcp);
+    if ($("openSettings")) $("openSettings").addEventListener("click", function () { renderSecondBrain(); renderMcp(); });
+    renderSecondBrain(); renderMcp();
     if ($("arenaPrompt")) $("arenaPrompt").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); broadcastArena(); } });
     document.addEventListener("mousedown", function (e) { if (!e.target.closest(".arena-pill")) closeArenaPills(); });
     renderArenaCards();

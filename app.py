@@ -892,6 +892,93 @@ def api_secondbrain_browse() -> Response:
     return jsonify({"ok": True, "path": proc.stdout.strip().rstrip("/")})
 
 
+# --- Custom MCP servers (Settings → Tools): connect tools for ALL models ----
+_MCP_CONFIG: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_servers.json")
+
+
+def _load_mcp_config() -> dict[str, Any]:
+    try:
+        with open(_MCP_CONFIG, encoding="utf-8") as f:
+            d = json.load(f)
+        if not isinstance(d, dict):
+            d = {}
+    except (OSError, ValueError):
+        d = {}
+    d.setdefault("servers", [])
+    return d
+
+
+def _save_mcp_config(d: dict[str, Any]) -> None:
+    with open(_MCP_CONFIG, "w", encoding="utf-8") as f:
+        json.dump(d, f, indent=2)
+
+
+@app.get("/api/mcp")
+def api_mcp() -> Response:
+    """Configured MCP servers + their live connection/tool status."""
+    return jsonify({"servers": MCP.server_status()})
+
+
+@app.post("/api/mcp/save")
+def api_mcp_save() -> Response:
+    """Add or update an MCP server, then reconnect so its tools reach every model.
+    Read-prefixed tools are exposed by default; pass allowed_tools to widen that."""
+    import shlex
+    data: dict[str, Any] = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip()
+    command = str(data.get("command", "")).strip()
+    if not name or not command:
+        return jsonify({"ok": False, "error": "A name and a command are required."}), 400
+    args = data.get("args")
+    if isinstance(args, str):
+        try:
+            args = shlex.split(args)
+        except ValueError:
+            args = args.split()
+    elif not isinstance(args, list):
+        args = []
+    entry: dict[str, Any] = {"name": name, "command": command, "args": args, "enabled": bool(data.get("enabled", True))}
+    if isinstance(data.get("allowed_tools"), list) and data["allowed_tools"]:
+        entry["allowed_tools"] = data["allowed_tools"]
+    if isinstance(data.get("env"), dict) and data["env"]:
+        entry["env"] = data["env"]
+    cfg = _load_mcp_config()
+    servers = cfg["servers"]
+    for i, s in enumerate(servers):
+        if s.get("name") == name:
+            servers[i] = {**s, **entry}
+            break
+    else:
+        servers.append(entry)
+    _save_mcp_config(cfg)
+    threading.Thread(target=MCP.reload, daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/mcp/toggle")
+def api_mcp_toggle() -> Response:
+    data: dict[str, Any] = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip()
+    cfg = _load_mcp_config()
+    for s in cfg["servers"]:
+        if s.get("name") == name:
+            s["enabled"] = bool(data.get("enabled"))
+    _save_mcp_config(cfg)
+    threading.Thread(target=MCP.reload, daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/mcp/remove")
+def api_mcp_remove() -> Response:
+    data: dict[str, Any] = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip()
+    cfg = _load_mcp_config()
+    cfg["servers"] = [s for s in cfg["servers"] if s.get("name") != name]
+    _save_mcp_config(cfg)
+    threading.Thread(target=MCP.reload, daemon=True).start()
+    return jsonify({"ok": True})
+
+
 _TEXT_EXTS = frozenset({
     ".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".log", ".rtf",
     ".py", ".js", ".ts", ".html", ".css", ".yaml", ".yml", ".xml",

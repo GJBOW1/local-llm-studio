@@ -262,6 +262,39 @@ class MCPBridge:
         except Exception as exc:
             return f"Tool call failed: {exc}"
 
+    def server_status(self) -> list[dict[str, Any]]:
+        """Configured servers + live connection/tool info, for the Settings UI."""
+        self._ensure_ready()
+        try:
+            cfg = json.load(open(self.config_path, encoding="utf-8"))
+        except (OSError, ValueError):
+            cfg = {"servers": []}
+        live = {s.name: s for s in self.servers}
+        out: list[dict[str, Any]] = []
+        for spec in cfg.get("servers", []):
+            srv = live.get(spec.get("name", ""))
+            out.append({
+                "name": spec.get("name", ""),
+                "command": spec.get("command", ""),
+                "args": spec.get("args", []),
+                "enabled": spec.get("enabled", True),
+                "connected": srv is not None,
+                "tools": [t["name"] for t in srv.tools] if srv else [],
+            })
+        return out
+
+    def reload(self) -> None:
+        """Re-read the config and reconnect — after the user edits MCP settings."""
+        with self._lock:
+            try:
+                self.close()
+            except Exception:
+                pass
+            self.servers = []
+            self._tool_owner = {}
+            self._ready = False
+        self._ensure_ready()
+
     def close(self) -> None:
         for srv in self.servers:
             srv.close()

@@ -260,6 +260,18 @@
       </div>
 
       <div class="set-sec">
+        <h4>Tools (MCP) <small style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">· connect MCP servers — their tools reach every model</small></h4>
+        <div id="mcpServers"></div>
+        <div class="cloudp">
+          <div class="cloudp-top"><span class="cloudp-lg" style="background:#67d68a">⚙</span><span class="cloudp-name">Add an MCP server</span></div>
+          <div class="cloudp-row" style="margin-bottom:7px"><input id="mcpName" type="text" placeholder="Name (e.g. My Tools)" spellcheck="false" /></div>
+          <div class="cloudp-row" style="margin-bottom:7px"><input id="mcpCmd" type="text" placeholder="Command (e.g. node, npx, or /path/.venv/bin/python)" spellcheck="false" /></div>
+          <div class="cloudp-row"><input id="mcpArgs" type="text" placeholder="Args (e.g. /path/to/server.js)" spellcheck="false" /><button class="cloudp-btn" id="mcpAdd">Add</button></div>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.5">Read-only tools (get/list/search/read…) are exposed by default — a safety guard so models can look things up but not take destructive actions.</div>
+        </div>
+      </div>
+
+      <div class="set-sec">
         <h4>Second brain <small style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">· ground answers in your Obsidian vault</small></h4>
         <div class="cloudp">
           <div class="cloudp-top">
