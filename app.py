@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import sys
 import re
 import secrets
 import subprocess
@@ -26,7 +27,12 @@ from flask import Flask, Response, jsonify, render_template, request, send_file
 
 from mcp_bridge import MCPBridge
 
-app = Flask(__name__)
+_RES_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+app = Flask(
+    __name__,
+    template_folder=os.path.join(_RES_DIR, "templates"),
+    static_folder=os.path.join(_RES_DIR, "static"),
+)
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024  # 64 MB cap on uploads / image payloads
 
 OLLAMA_HOST: str = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
@@ -2887,7 +2893,9 @@ def api_sessions_delete(sid: str) -> Response:
     return jsonify({"ok": True})
 
 
-if __name__ == "__main__":
+def run_worker() -> None:
+    """Run the Flask chat worker. Entry point for both `python app.py` (dev) and
+    the frozen launcher (`lls --worker`)."""
     import atexit
     import signal
 
@@ -2907,5 +2915,11 @@ if __name__ == "__main__":
     # supervisor's single subprocess maps to a single PID it can cleanly terminate.
     # threaded=True so streaming chats, racing Arena panes, and the (blocking) video
     # poll loop all run concurrently instead of serializing on one worker thread.
+    # debug=False: a frozen build has no source to reload and must not expose the
+    # interactive debugger.
     port = int(os.environ.get("PORT", "5050"))
-    app.run(host="127.0.0.1", port=port, debug=True, use_reloader=False, threaded=True)
+    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True)
+
+
+if __name__ == "__main__":
+    run_worker()

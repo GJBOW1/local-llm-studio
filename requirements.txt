@@ -1,0 +1,7 @@
+# Local LLM Studio — runtime dependencies.
+# (mcp_bridge is a local module, not a package.)
+Flask>=3.0,<3.1
+requests>=2.31,<3
+
+# Build-only (installed by CI / build scripts, not needed at runtime):
+#   pyinstaller>=6.6

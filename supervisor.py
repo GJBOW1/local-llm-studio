@@ -98,7 +98,10 @@ def _start_worker(port: int) -> tuple[bool, str]:
     if not _port_free(port):
         return False, f"Port {port} is already in use — pick another."
     env = {**os.environ, "PORT": str(port), "LLS_CONTROL_URL": _control_url()}
-    _worker = subprocess.Popen([PYTHON, "app.py"], cwd=str(HERE), env=env)
+    # Frozen builds re-invoke the single bundled binary as the worker; dev runs
+    # the script with the current interpreter.
+    cmd = [sys.executable, "--worker"] if getattr(sys, "frozen", False) else [PYTHON, "app.py"]
+    _worker = subprocess.Popen(cmd, cwd=str(HERE), env=env)
     _worker_port = port
     if not _wait_for_port(port):
         return False, "The server did not come up in time."
@@ -373,8 +376,12 @@ GOODBYE_HTML = """<!DOCTYPE html>
 """
 
 
-if __name__ == "__main__":
+def run() -> None:
     # Bring the chat server up on boot so launching feels instant, then serve
     # the control panel. The worker is a managed subprocess from here on.
     _start_worker(DEFAULT_WORKER_PORT)
     app.run(host=HOST, port=CONTROL_PORT, debug=False, use_reloader=False)
+
+
+if __name__ == "__main__":
+    run()

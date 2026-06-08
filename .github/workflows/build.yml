@@ -1,0 +1,89 @@
+name: Build portable installers
+
+# Builds Local LLM Studio for macOS (Apple Silicon + Intel) and Windows, each with
+# the Ollama engine bundled. Runs on a tag push (v*) or manually.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  macos:
+    name: macOS (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, arch: arm64 }    # Apple Silicon
+          - { os: macos-13, arch: x86_64 }   # Intel
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          pip install -r requirements.txt
+      - name: Fetch Ollama engine
+        run: bash packaging/fetch-ollama.sh
+      - name: PyInstaller build
+        run: pyinstaller --noconfirm --clean lls.spec
+      # --- Optional signing/notarization: runs only if the repo has the secrets. ---
+      - name: Sign + notarize + DMG
+        if: ${{ secrets.MACOS_CERT_P12 != '' }}
+        env:
+          DEVELOPER_ID: ${{ secrets.MACOS_DEVELOPER_ID }}
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          AC_APPLE_ID: ${{ secrets.AC_APPLE_ID }}
+          AC_TEAM_ID: ${{ secrets.AC_TEAM_ID }}
+          AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
+        run: |
+          echo "$MACOS_CERT_P12" | base64 --decode > cert.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security import cert.p12 -k build.keychain -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci build.keychain
+          xcrun notarytool store-credentials lls-notary --apple-id "$AC_APPLE_ID" --team-id "$AC_TEAM_ID" --password "$AC_PASSWORD" --keychain build.keychain
+          NOTARY_PROFILE=lls-notary bash packaging/build-macos.sh
+      - name: Package unsigned DMG (no secrets)
+        if: ${{ secrets.MACOS_CERT_P12 == '' }}
+        run: |
+          hdiutil create -volname "Local LLM Studio" \
+            -srcfolder "dist/Local LLM Studio.app" -ov -format UDZO \
+            "dist/Local-LLM-Studio-${{ matrix.arch }}-unsigned.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/*.dmg
+
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          pip install -r requirements.txt
+      - name: Fetch Ollama engine (Windows)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force vendor_bin | Out-Null
+          # NOTE: confirm the asset name on the latest Ollama release if this 404s.
+          Invoke-WebRequest -Uri "https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip" -OutFile ollama.zip
+          Expand-Archive ollama.zip -DestinationPath ollama_extracted -Force
+          Copy-Item (Get-ChildItem -Recurse ollama_extracted -Filter ollama.exe | Select-Object -First 1).FullName vendor_bin/ollama.exe
+      - name: PyInstaller build
+        run: pyinstaller --noconfirm --clean lls.spec
+      - name: Zip portable build
+        shell: pwsh
+        run: Compress-Archive -Path "dist/Local LLM Studio/*" -DestinationPath "dist/Local-LLM-Studio-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: dist/*.zip

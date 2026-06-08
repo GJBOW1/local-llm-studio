@@ -28,3 +28,10 @@ node_modules/
 # Server-side session mirror + agentic change journal/checkpoints (local data)
 .lls-sessions/
 .lls-agent/
+
+# --- packaging build artifacts ---
+build/
+dist/
+vendor_bin/
+*.dmg
+cert.p12
