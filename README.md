@@ -6,7 +6,7 @@
 
 Race local and cloud models side‑by‑side, ground every answer in your own notes, and let several models collaborate on one document — all behind a glassy, offline‑first interface where nothing leaves your computer unless you say so.
 
-![Local LLM Studio — chat with live diagrams and on‑device telemetry](docs/screenshots/01-chat.png)
+![Local LLM Studio](docs/banners/banner.png)
 
 [![Made with Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
@@ -37,6 +37,8 @@ Most AI apps send your conversations — and your context — to someone else's 
 - **📊 Live artifacts** — models can draw **Mermaid** diagrams, **Chart.js** charts, **SVG**, and sandboxed **HTML** that render right in the chat.
 - **🛠 Bring your own tools** — connect any **MCP server** in Settings and its tools become available to every model (read‑only by default, for safety).
 - **🔒 Private by design** — offline models cost **$0** and never phone home; a structural guard keeps your private notes out of any prompt that goes to a cloud model.
+
+![The glass interface — chat with live diagrams and on‑device telemetry](docs/screenshots/01-chat.png)
 
 ---
 
