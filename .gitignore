@@ -35,3 +35,4 @@ dist/
 vendor_bin/
 *.dmg
 cert.p12
+mcp_servers.json

@@ -76,7 +76,7 @@ RAG_TIMEOUT: float = float(os.environ.get("LLS_RAG_TIMEOUT", "25"))
 # The Obsidian vault whose wiki/ Graphify indexed — lets a clicked graph node open
 # its source .md in a preview. Override via LLS_VAULT_ROOT.
 VAULT_ROOT: str = os.environ.get(
-    "LLS_VAULT_ROOT", "~/Obsidian"
+    "LLS_VAULT_ROOT", os.path.expanduser("~/Obsidian")
 )
 VAULT_WIKI: str = os.path.join(VAULT_ROOT, "wiki")
 

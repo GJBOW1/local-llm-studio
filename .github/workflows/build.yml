@@ -17,6 +17,10 @@ jobs:
           - { os: macos-14, arch: arm64 }    # Apple Silicon
           - { os: macos-13, arch: x86_64 }   # Intel
     runs-on: ${{ matrix.os }}
+    # Surface the cert secret as an env var so steps can branch on its presence —
+    # the `secrets` context is NOT allowed in `if:` conditions.
+    env:
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,10 +35,9 @@ jobs:
         run: pyinstaller --noconfirm --clean lls.spec
       # --- Optional signing/notarization: runs only if the repo has the secrets. ---
       - name: Sign + notarize + DMG
-        if: ${{ secrets.MACOS_CERT_P12 != '' }}
+        if: ${{ env.MACOS_CERT_P12 != '' }}
         env:
           DEVELOPER_ID: ${{ secrets.MACOS_DEVELOPER_ID }}
-          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
           AC_APPLE_ID: ${{ secrets.AC_APPLE_ID }}
           AC_TEAM_ID: ${{ secrets.AC_TEAM_ID }}
@@ -49,7 +52,7 @@ jobs:
           xcrun notarytool store-credentials lls-notary --apple-id "$AC_APPLE_ID" --team-id "$AC_TEAM_ID" --password "$AC_PASSWORD" --keychain build.keychain
           NOTARY_PROFILE=lls-notary bash packaging/build-macos.sh
       - name: Package unsigned DMG (no secrets)
-        if: ${{ secrets.MACOS_CERT_P12 == '' }}
+        if: ${{ env.MACOS_CERT_P12 == '' }}
         run: |
           hdiutil create -volname "Local LLM Studio" \
             -srcfolder "dist/Local LLM Studio.app" -ov -format UDZO \

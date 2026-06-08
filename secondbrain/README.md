@@ -25,7 +25,7 @@ Run it after adding/editing a lot of notes, or if the index is ever lost.
 ## Config (env or `config.local.json`)
 | Var | Default | Meaning |
 |---|---|---|
-| `LLS_VAULT_ROOT` | `…/the user/Bobiverse` | the vault to index |
+| `LLS_VAULT_ROOT` | `~/Obsidian` | the vault to index |
 | `LLS_RAG_DIR` | `~/skippy-rag` | where the index/scripts live |
 | `LLS_RAG_MIN_SCORE` | `0.6` | retrieval threshold (higher = stricter) |
 | `LLS_RAG_TOP_K` | `5` | notes considered per message |

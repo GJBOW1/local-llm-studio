@@ -82,7 +82,7 @@ if IS_MAC:
         coll,
         name="Local LLM Studio.app",
         icon=_icon,
-        bundle_identifier="com.gregg.localllmstudio",
+        bundle_identifier="com.localllmstudio.app",
         info_plist={
             "CFBundleName": "Local LLM Studio",
             "CFBundleDisplayName": "Local LLM Studio",

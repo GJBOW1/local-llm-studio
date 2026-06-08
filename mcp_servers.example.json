@@ -1,0 +1,19 @@
+{
+  "_comment": "Copy this to mcp_servers.json (gitignored) and set your own paths. Local LLM Studio connects to these MCP servers. Safety policy: by default ONLY tools whose names start with a READ prefix (get/list/search/check/read/describe/find/query/summarize) are exposed to the model. A server may set an explicit 'allowed_tools' whitelist to override that. Auth lives inside each server (never handled here).",
+  "servers": [
+    {
+      "name": "Example Python server (read-only)",
+      "enabled": false,
+      "command": "/path/to/your/mcp-server/.venv/bin/python",
+      "args": ["/path/to/your/mcp-server/server.py"]
+    },
+    {
+      "name": "Example Node server with an allow-list",
+      "enabled": false,
+      "command": "node",
+      "args": ["/path/to/your/mcp-server/dist/index.js"],
+      "env": { "NODE_ENV": "production" },
+      "allowed_tools": ["read_file", "list_directory", "get_file_info"]
+    }
+  ]
+}

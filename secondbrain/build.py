@@ -24,7 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 INDEX = os.path.join(HERE, "index.json")
 VAULT = os.environ.get(
     "LLS_VAULT_ROOT",
-    "~/Obsidian",
+    os.path.expanduser("~/Obsidian"),
 )
 OLLAMA = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 MODEL = os.environ.get("LLS_RAG_MODEL", "nomic-embed-text")

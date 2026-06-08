@@ -20,7 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.path.join(HERE, "graphify-out")
 VAULT = os.environ.get(
     "LLS_VAULT_ROOT",
-    "~/Obsidian",
+    os.path.expanduser("~/Obsidian"),
 )
 WIKI = os.path.join(VAULT, "wiki")
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
