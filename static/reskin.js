@@ -613,7 +613,7 @@
     function setRate() { if (meta && tLast > tFirst) { var w = assistant.content.trim() ? assistant.content.trim().split(/\s+/).length : 0; meta.textContent = Math.round(w / ((tLast - tFirst) / 1000)) + " w/s"; } }
     var payload = { model: m.name, messages: payloadMsgs, options: {} };
     if (m.provider) payload.provider = m.provider;
-    if (state.doc && state.doc.open && state.doc.agent_editable && (state.penHolder === id || (state.collabAll && isToolModel(m.name)))) payload.can_edit_doc = true;
+    if (!state.userPen && state.doc && state.doc.open && state.doc.agent_editable && (state.penHolder === id || (state.collabAll && isToolModel(m.name)))) payload.can_edit_doc = true;
     fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
       .then(function (res) {
         var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
@@ -686,6 +686,10 @@
   }
   function setPen(id) {
     var m = arenaItem(id);
+    if (state.userPen) {
+      window.showToast && window.showToast("You hold the pen — click the pen above the document to hand it back to the models first.");
+      return;
+    }
     if (m && !isToolModel(m.name)) {
       window.showToast && window.showToast(m.name.split(":")[0] + " is a reasoning model — it can't edit documents. Give the pen to a tool-capable model (gpt-5.5, Gemini, Claude, …).");
       return;
@@ -697,15 +701,19 @@
     var nameEl = $("docName"), chip = $("docPenChip"), body = $("docBodyEl");
     var holder = state.penHolder ? arenaItem(state.penHolder) : null;
     if (!state.doc || !state.doc.open) {
-      nameEl.textContent = "No document"; chip.hidden = true; pane.classList.remove("held"); pane.style.removeProperty("--pen");
+      nameEl.textContent = "No document"; chip.hidden = true; pane.classList.remove("held", "userheld"); pane.style.removeProperty("--pen");
+      if ($("docUserPen")) $("docUserPen").hidden = true;
       body.classList.remove("editing");
       body.innerHTML = '<div class="arena-out-idle" style="padding:20px">Open a Markdown/text file. Every racing model can read it; give one model the pen (✒ on its card) and it edits the doc when it answers.</div>';
       return;
     }
     nameEl.textContent = state.doc.name;
-    chip.hidden = false;
-    if (holder) { var c = colorFor(holder.name); pane.classList.add("held"); pane.style.setProperty("--pen", c); chip.style.setProperty("--pen", c); chip.textContent = "✒ " + holder.name.split(":")[0] + " holds the pen"; }
-    else { pane.classList.remove("held"); pane.style.removeProperty("--pen"); chip.style.removeProperty("--pen"); chip.textContent = state.doc.agent_editable ? "✒ give a card the pen, or hit Collaborate" : "preview only"; }
+    var up = $("docUserPen");
+    if (up) { up.hidden = false; up.classList.toggle("on", !!state.userPen); var lbl = up.querySelector(".dup-label"); if (lbl) lbl.textContent = state.userPen ? "You hold it" : "Take pen"; up.title = state.userPen ? "You hold the pen — agents can't edit. Click to hand it back to the models." : "Take the pen yourself — the AI agents can't edit while you hold it."; }
+    pane.classList.toggle("userheld", !!state.userPen);
+    if (state.userPen) { pane.classList.remove("held"); pane.style.removeProperty("--pen"); chip.hidden = true; }
+    else if (holder) { var c = colorFor(holder.name); pane.classList.add("held"); pane.style.setProperty("--pen", c); chip.style.setProperty("--pen", c); chip.textContent = "✒ " + holder.name.split(":")[0]; chip.hidden = false; }
+    else { pane.classList.remove("held"); pane.style.removeProperty("--pen"); chip.style.removeProperty("--pen"); chip.textContent = state.doc.agent_editable ? "agents can edit" : "preview"; chip.hidden = false; }
     if ($("docSaveBtn")) $("docSaveBtn").style.display = state.doc.editable ? "" : "none";
     if (state.doc.editable) {
       body.dataset.pkey = "";
@@ -731,6 +739,20 @@
     }
   }
   function toggleDoc() { var pane = $("arenaDoc"); if (!pane) return; pane.hidden = !pane.hidden; $("arenaDocBtn") && $("arenaDocBtn").classList.toggle("on", !pane.hidden); if (!pane.hidden) loadDoc(); }
+  // The user pen: when held, NO agent can edit (the pen-holder is cleared and can_edit_doc
+  // is suppressed everywhere); click again to hand control back to the agents.
+  function toggleUserPen() {
+    if (!state.doc || !state.doc.open) { window.showToast && window.showToast("Open a document first"); return; }
+    state.userPen = !state.userPen;
+    if (state.userPen) {
+      state.penHolder = null; renderArenaCards();
+      window.showToast && window.showToast("You hold the pen — the AI agents can't edit. Click the pen again to hand it back.");
+    } else {
+      renderArenaCards();
+      window.showToast && window.showToast("Pen handed back to the agents.");
+    }
+    renderDoc();
+  }
 
   // ---------- Autonomous collaboration: models pass the pen + reach consensus ----------
   // One focused, stateless turn against a model (the doc is injected server-side). Shows
@@ -744,7 +766,7 @@
       if (meta) meta.textContent = "…";
       var payload = { model: item.name, messages: [{ role: "user", content: modelText }], options: {} };
       if (item.provider) payload.provider = item.provider;
-      if (state.penHolder === item.id && state.doc && state.doc.open && state.doc.agent_editable) payload.can_edit_doc = true;
+      if (!state.userPen && state.penHolder === item.id && state.doc && state.doc.open && state.doc.agent_editable) payload.can_edit_doc = true;
       fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
         .then(function (res) {
           var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
@@ -776,6 +798,7 @@
   var _collabOn = false;
   function autoCollaborate() {
     if (_collabOn) return;
+    if (state.userPen) { window.showToast && window.showToast("You hold the pen — click the pen above the document to let the models collaborate."); return; }
     if (state.arena.length < 2) { window.showToast && window.showToast("Add at least 2 models to collaborate"); return; }
     var nonTool = state.arena.filter(function (m) { return !isToolModel(m.name); }).map(function (m) { return m.name.split(":")[0]; });
     if (nonTool.length) { window.showToast && window.showToast("Remove " + nonTool.join(", ") + " — reasoning model(s) can't edit documents. Collaborate needs tool-capable models only."); refreshCollabBtn(); return; }
@@ -925,6 +948,7 @@
     if ($("arenaCollab")) $("arenaCollab").addEventListener("click", autoCollaborate);
     if ($("arenaDocBtn")) $("arenaDocBtn").addEventListener("click", toggleDoc);
     if ($("docNewBtn")) $("docNewBtn").addEventListener("click", newDoc);
+    if ($("docUserPen")) $("docUserPen").addEventListener("click", toggleUserPen);
     if ($("docOpenBtn")) $("docOpenBtn").addEventListener("click", openDoc);
     if ($("docSaveBtn")) $("docSaveBtn").addEventListener("click", saveDoc);
     if ($("sbConnect")) $("sbConnect").addEventListener("click", connectVault);
