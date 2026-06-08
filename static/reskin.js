@@ -690,10 +690,11 @@
       } else if (d.error) window.showToast && window.showToast(d.error);
     }).catch(function () { btn.disabled = false; btn.innerHTML = old; });
   }
-  function saveDoc() {
+  function saveDoc(silent) {
     var ta = document.querySelector("#docBodyEl textarea"); if (!ta || !state.doc) return;
+    state.doc.content = ta.value;   // keep state current immediately so a re-render can't lose it
     fetch("/api/doc/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: ta.value }) })
-      .then(function (r) { return r.json(); }).then(function (d) { if (d.ok) { state.doc.content = ta.value; window.showToast && window.showToast("Document saved"); } else window.showToast && window.showToast(d.error || "Save failed"); });
+      .then(function (r) { return r.json(); }).then(function (d) { if (!silent) window.showToast && window.showToast(d.ok ? "Document saved" : (d.error || "Save failed")); });
   }
   function setPen(id) {
     var m = arenaItem(id);
@@ -730,6 +731,7 @@
       body.dataset.pkey = "";
       if (!body.querySelector("textarea")) { body.classList.add("editing"); body.innerHTML = '<textarea spellcheck="false"></textarea>'; }
       var ta = body.querySelector("textarea");
+      ta.oninput = function () { if (state.doc) state.doc.content = ta.value; };   // sync edits live so they survive re-renders / pen hand-back
       if (document.activeElement !== ta) ta.value = state.doc.content || "";
     } else {
       body.classList.remove("editing");
@@ -754,13 +756,16 @@
   // is suppressed everywhere); click again to hand control back to the agents.
   function toggleUserPen() {
     if (!state.doc || !state.doc.open) { window.showToast && window.showToast("Open a document first"); return; }
-    state.userPen = !state.userPen;
     if (state.userPen) {
-      state.penHolder = null; renderArenaCards();
-      window.showToast && window.showToast("You hold the pen — the AI agents can't edit. Click the pen again to hand it back.");
+      // Handing the pen back: persist the user's edits FIRST so the re-render can't drop them.
+      var ta = document.querySelector("#docBodyEl textarea");
+      var hadEdits = !!(ta && state.doc.editable);
+      if (hadEdits) { state.doc.content = ta.value; saveDoc(true); }
+      state.userPen = false; renderArenaCards();
+      window.showToast && window.showToast(hadEdits ? "Saved your edits — pen handed back to the agents." : "Pen handed back to the agents.");
     } else {
-      renderArenaCards();
-      window.showToast && window.showToast("Pen handed back to the agents.");
+      state.userPen = true; state.penHolder = null; renderArenaCards();
+      window.showToast && window.showToast("You hold the pen — the AI agents can't edit. Click the pen again to hand it back.");
     }
     renderDoc();
   }
