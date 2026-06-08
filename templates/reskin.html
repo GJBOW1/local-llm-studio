@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Local LLM Studio</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230D1117'/><path d='M9 8h14a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-7l-5 4v-4h-2a3 3 0 0 1-3-3v-7a3 3 0 0 1 3-3z' fill='%239bb5e8'/></svg>" />
+  <!-- Apply theme before first paint to avoid a flash -->
+  <script>try{var t=localStorage.getItem('lls-theme')||'dark';document.documentElement.setAttribute('data-theme',t);var a=localStorage.getItem('lls-accent');if(a){var m={periwinkle:['#9bb5e8','#6f8fcf'],violet:['#b69ef0','#8f6fd0'],cyan:['#4dd6e6','#2fa6c9'],emerald:['#67d68a','#2f9d63'],coral:['#ff8a6b','#e06245']}[a];if(m){document.documentElement.style.setProperty('--accent',m[0]);document.documentElement.style.setProperty('--accent-2',m[1]);}}}catch(e){}</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;600;700&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='reskin.css') }}?v={{ asset_v }}" />
+  <meta name="control-url" content="{{ control_url }}" />
+</head>
+<body>
+  <!-- Watery animated background -->
+  <div class="aqua" aria-hidden="true">
+    <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+    <div class="grain"></div>
+  </div>
+
+  <div class="app" id="app">
+    <!-- ===== Sidebar ===== -->
+    <aside class="side glass" id="side">
+      <div class="side-brand">
+        <div class="brandmark">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M9 8h14a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-7l-5 4v-4h-2a3 3 0 0 1-3-3v-7a3 3 0 0 1 3-3z" transform="translate(-3 -3) scale(0.9)" fill="#0a1020"/></svg>
+        </div>
+        <div class="bt">Local LLM Studio<small>Offline · Private · $0</small></div>
+      </div>
+
+      <button class="newchat" id="newChat"><svg viewBox="0 0 24 24" fill="none" stroke="#0a1020" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New chat</button>
+
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="convoSearch" type="search" placeholder="Search chats…" aria-label="Search conversations" />
+      </div>
+
+      <nav class="convo-scroll" id="convoList" aria-label="Conversations">
+        <div class="daygroup">Today</div>
+        <div class="convo on"><span class="ci"></span><div class="cmain"><div class="ctitle">Debounce search input</div></div><button class="cdel" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12"/></svg></button></div>
+        <div class="convo"><span class="ci"></span><div class="cmain"><div class="ctitle">Knowledge graph of my notes</div></div><button class="cdel" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12"/></svg></button></div>
+        <div class="daygroup">Yesterday</div>
+        <div class="convo"><span class="ci"></span><div class="cmain"><div class="ctitle">Compare Llama vs Qwen</div></div><button class="cdel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12"/></svg></button></div>
+        <div class="convo"><span class="ci"></span><div class="cmain"><div class="ctitle">Draft the launch email</div></div><button class="cdel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12"/></svg></button></div>
+        <div class="daygroup">Previous 7 days</div>
+        <div class="convo"><span class="ci"></span><div class="cmain"><div class="ctitle">Refactor auth middleware</div></div><button class="cdel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12"/></svg></button></div>
+      </nav>
+
+      <div class="side-foot">
+        <div class="uchip"><div class="uava">G</div><div class="uname">On this Mac<small>llama.cpp · Metal</small></div></div>
+        <button class="icon-btn" id="openSettings" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.8 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.8H1a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9 4.6h.1A1.7 1.7 0 0 0 11 3V3a2 2 0 1 1 4 0v.1A1.7 1.7 0 0 0 18 4.6a1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.7 1H24a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" transform="scale(0.85) translate(2 2)"/></svg></button>
+      </div>
+    </aside>
+
+    <!-- ===== Main ===== -->
+    <main class="main glass" id="main">
+      <header class="topbar">
+        <button class="icon-btn" id="sidebarToggle" title="Toggle sidebar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+        <div class="topttl"><div class="t">Debounce search input</div><div class="s"><span class="statusdot"></span>Ollama connected · 127.0.0.1:5050</div></div>
+
+        <div class="seg topseg" id="viewSeg"><button class="on" data-view="chat">Chat</button><button data-view="arena">Arena</button></div>
+
+        <div class="mp" id="modelPickerWrap">
+          <button class="mp-btn" id="modelMenuBtn"><span class="dotmod"></span><span class="mname">gemma4:12b-it-qat</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></button>
+          <div class="mp-menu" id="modelMenu" hidden>
+            <div class="mp-sec">Gemma (Google)</div>
+            <div class="mp-row cur"><span class="mp-dot" style="background:#9bb5e8"></span><span class="mp-n">gemma4:12b-it-qat</span><span class="mp-sz">6.7 GB</span><svg class="mp-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></div>
+            <div class="mp-row"><span class="mp-dot" style="background:#9bb5e8"></span><span class="mp-n">gemma3:12b-it-qat</span><span class="mp-sz">8.3 GB</span></div>
+            <div class="mp-sec">Qwen</div>
+            <div class="mp-row"><span class="mp-dot" style="background:#e25ad0"></span><span class="mp-n">qwen3:8b</span><span class="mp-sz">4.9 GB</span></div>
+            <div class="mp-row"><span class="mp-dot" style="background:#e25ad0"></span><span class="mp-n">qwen3:14b</span><span class="mp-sz" style="color:var(--accent)">⬇ download</span></div>
+            <div class="mp-sec">NVIDIA</div>
+            <div class="mp-row"><span class="mp-dot" style="background:#76b900"></span><span class="mp-n">nemotron-mini:4b</span><span class="mp-sz">2.7 GB</span></div>
+            <div class="mp-sec">Cloud · connect a key</div>
+            <div class="mp-row"><span class="mp-dot" style="background:#d97757"></span><span class="mp-n">claude-opus-4-8</span></div>
+            <div class="mp-row"><span class="mp-dot" style="background:#10a37f"></span><span class="mp-n">gpt-5.5</span></div>
+          </div>
+        </div>
+
+        <button class="icon-btn" id="filesToggle" title="Project files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+        <button class="icon-btn" id="brainToggle" title="Second brain"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="7" r="2.3"/><circle cx="18" cy="6" r="2.3"/><circle cx="13" cy="17" r="2.3"/><path d="M8 8l7 7M16 7l-2 8" stroke-linecap="round"/></svg></button>
+        <button class="icon-btn on" id="telemetryToggle" title="Telemetry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16l4-5 3 3 4-7 4 6 3-2"/></svg></button>
+        <button class="icon-btn" id="themeToggle" title="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.5 6.5 0 0 0 9.8 9.8z"/></svg></button>
+      </header>
+
+      <!-- Transcript -->
+      <section class="transcript" id="transcript">
+        <div class="msg user">
+          <div class="av me">You</div>
+          <div class="bubble-wrap"><div class="bubble">Add a debounce to my search input — show me a clean hook.</div></div>
+        </div>
+
+        <div class="msg bot">
+          <div class="av bot"><svg viewBox="0 0 24 24" fill="none"><path d="M9 8h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-6l-4 3v-3H9a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z" fill="#0a1020" transform="scale(.8) translate(2 2)"/></svg></div>
+          <div class="bubble-wrap">
+            <div class="bubble">
+              <div class="brole">gemma4 · local</div>
+              <p>Here's a tiny <code class="inl">useDebounce</code> hook with proper cleanup:</p>
+              <div class="codeblock">
+                <div class="cbar"><span class="clang">typescript</span><button class="ccopy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button></div>
+                <pre><span class="tk-kw">function</span> <span class="tk-fn">useDebounce</span>&lt;T&gt;(value: T, ms = <span class="tk-num">300</span>) {
+  <span class="tk-kw">const</span> [v, setV] = <span class="tk-fn">useState</span>(value);
+  <span class="tk-fn">useEffect</span>(() =&gt; {
+    <span class="tk-kw">const</span> id = <span class="tk-fn">setTimeout</span>(() =&gt; <span class="tk-fn">setV</span>(value), ms);
+    <span class="tk-kw">return</span> () =&gt; <span class="tk-fn">clearTimeout</span>(id);
+  }, [value, ms]);
+  <span class="tk-kw">return</span> v;
+}</pre>
+              </div>
+              <p>It resets the timer on every keystroke, so <code class="inl">v</code> only updates once input settles. Drop it straight into your search box — no library needed.</p>
+            </div>
+            <div class="msg-actions">
+              <button class="ma" title="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+              <button class="ma" title="Regenerate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Composer -->
+      <footer class="composer">
+        <div class="composer-inner">
+          <div class="cmeta">
+            <div class="temp"><span>Temp</span><input type="range" min="0" max="2" step="0.1" value="0.7" id="tempSlider"/><span class="tv" id="tempVal">0.7</span></div>
+            <div class="caps"><span class="cap">✦ tools</span><span class="cap">◇ vision</span></div>
+            <div class="meters"><span id="tps">62 t/s</span><span class="ctxmeter"><span class="ctxtrack"><span class="ctxfill"></span></span><span>3k</span></span></div>
+          </div>
+          <div class="inputbar" id="inputbar">
+            <button class="cbtn" id="attach" title="Attach"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11 12.3 20.1a5.5 5.5 0 0 1-7.8-7.8l9.2-9.2a3.5 3.5 0 0 1 5 5l-9.2 9.2a1.5 1.5 0 0 1-2.1-2.1l8.5-8.5"/></svg></button>
+            <button class="cbtn mic" id="mic" title="Voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v3"/></svg></button>
+            <textarea id="input" rows="1" placeholder="Send a message…  (⏎ to send, ⇧⏎ for newline)"></textarea>
+            <button class="send" id="send" title="Send"><svg viewBox="0 0 24 24" fill="#0a1020"><path d="M3.4 20.4 21 12 3.4 3.6 3.39 10.2 15 12l-11.61 1.8z"/></svg></button>
+          </div>
+          <div class="composer-hint"><kbd>⏎</kbd> send · <kbd>⇧⏎</kbd> newline · <kbd>@</kbd> attach a file</div>
+        </div>
+      </footer>
+    </main>
+
+    <!-- ===== Inspector ===== -->
+    <aside class="inspector glass" id="inspector">
+      <div class="insp-head"><span class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16l4-5 3 3 4-7 4 6 3-2"/></svg>Live telemetry</span></div>
+      <div class="insp-tabs"><div class="insp-tab on" data-tab="telemetry">Telemetry</div><div class="insp-tab" data-tab="graph">Graph</div><div class="insp-tab" data-tab="sources">Sources</div></div>
+      <div class="insp-body">
+        <div class="insp-card">
+          <h5>Tokens / sec</h5>
+          <div class="metric-row"><span class="mlabel">Current</span><span class="mval" style="color:var(--accent);font-size:17px">62 t/s</span></div>
+          <svg class="spark" viewBox="0 0 200 40" preserveAspectRatio="none"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".35"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs><polyline points="0,30 25,26 50,28 75,18 100,22 125,12 150,16 175,8 200,14" fill="none" stroke="var(--accent)" stroke-width="2"/><polygon points="0,30 25,26 50,28 75,18 100,22 125,12 150,16 175,8 200,14 200,40 0,40" fill="url(#sg)"/></svg>
+        </div>
+        <div class="insp-card">
+          <h5>Context budget</h5>
+          <div class="bar-row"><div class="bl"><span>gemma4:12b-it-qat</span><b>3k / 16k</b></div><div class="bar-track"><div class="bar-fill" style="width:19%"></div></div></div>
+        </div>
+        <div class="insp-card">
+          <h5>GPU layer offload</h5>
+          <div style="display:flex;gap:4px;margin:4px 0 10px">
+            <span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--glass-brd-2)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--glass-brd-2)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--glass-brd-2)"></span>
+          </div>
+          <div class="metric-row"><span class="mlabel">Offloaded</span><span class="mval">11 / 14 layers</span></div>
+          <div class="metric-row"><span class="mlabel">VRAM</span><span class="mval">6.3 GB</span></div>
+        </div>
+        <p style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-top:4px">Live, on-device metrics — measured, never estimated.</p>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    // Minimal interactions for the static verification surface (real wiring lands in reskin.js next).
+    var app = document.getElementById('app');
+    document.getElementById('themeToggle').addEventListener('click', function () {
+      var cur = document.documentElement.getAttribute('data-theme');
+      var nx = cur === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', nx);
+      try { localStorage.setItem('lls-theme', nx); } catch (e) {}
+    });
+    document.getElementById('sidebarToggle').addEventListener('click', function () { app.classList.toggle('collapsed'); });
+    document.getElementById('telemetryToggle').addEventListener('click', function () { app.classList.toggle('show-inspector'); });
+    app.classList.add('show-inspector');
+    var mp = document.getElementById('modelPickerWrap'), mm = document.getElementById('modelMenu');
+    document.getElementById('modelMenuBtn').addEventListener('click', function (e) { e.stopPropagation(); mp.classList.toggle('open'); mm.hidden = !mp.classList.contains('open'); });
+    document.addEventListener('mousedown', function (e) { if (!mp.contains(e.target)) { mp.classList.remove('open'); mm.hidden = true; } });
+    document.querySelectorAll('.insp-tab').forEach(function (t) { t.addEventListener('click', function () { document.querySelectorAll('.insp-tab').forEach(function (x) { x.classList.remove('on'); }); t.classList.add('on'); }); });
+    document.querySelectorAll('#viewSeg button').forEach(function (b) { b.addEventListener('click', function () { document.querySelectorAll('#viewSeg button').forEach(function (x) { x.classList.remove('on'); }); b.classList.add('on'); }); });
+    var inp = document.getElementById('input'), bar = document.getElementById('inputbar');
+    inp.addEventListener('focus', function () { bar.classList.add('focus'); });
+    inp.addEventListener('blur', function () { bar.classList.remove('focus'); });
+    document.getElementById('tempSlider').addEventListener('input', function (e) { document.getElementById('tempVal').textContent = e.target.value; });
+  </script>
+</body>
+</html>

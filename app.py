@@ -549,6 +549,12 @@ def index() -> str:
     return render_template("index.html", control_url=CONTROL_URL, asset_v=_asset_version())
 
 
+@app.get("/v2")
+def index_v2() -> str:
+    """Serve the glassy reskin (work-in-progress; promoted to / when complete)."""
+    return render_template("reskin.html", control_url=CONTROL_URL, asset_v=_asset_version())
+
+
 @app.get("/favicon.ico")
 def favicon() -> Response:
     """Serve the inline brand mark so /favicon.ico never 404s, even on a direct hit."""
