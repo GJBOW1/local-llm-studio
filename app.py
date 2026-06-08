@@ -615,10 +615,14 @@ SAVE_DOCUMENT_SCHEMA: dict[str, Any] = {
 
 
 def _save_open_doc() -> str:
-    """Persist the open doc's current content to disk (idempotent finalize)."""
+    """Confirm the open doc is saved. Office files are written in-format by each edit, so
+    this is a no-op for them (writing the extracted text would corrupt them); text/Markdown
+    writes the current content to disk."""
     path = OPEN_DOC["path"]
     if not path:
         return "No document is open."
+    if OPEN_DOC.get("kind", "") in _AGENT_EDITABLE_KINDS:
+        return "Document saved."  # edits were already written in the document's own format
     if not OPEN_DOC.get("editable"):
         return "This document type can't be saved from here."
     try:
@@ -1753,13 +1757,18 @@ def _stream_openai_compatible(
                     # whichever endpoint the error names: the legacy Completions API, or
                     # the Responses API (the *-pro reasoning models). Route by the hint —
                     # don't send a v1/completions model to v1/responses.
-                    if "api.openai.com" in base:
-                        if "v1/completions" in low:
+                    if "api.openai.com" in base and ("not a chat model" in low or "v1/responses" in low or "v1/completions" in low):
+                        # Non-chat models split two ways: genuine legacy *instruct* models use
+                        # the old Completions API; everything modern (gpt-5.x *-pro reasoning
+                        # models, etc.) uses the Responses API. OpenAI's "did you mean
+                        # v1/completions?" hint is MISLEADING for the modern ones, so route by
+                        # the model name, not the hint.
+                        is_legacy = any(s in model for s in ("instruct", "davinci", "babbage", "curie", "text-ada"))
+                        if is_legacy:
                             yield from _stream_openai_legacy_completions(base, label, model, conv, key)
-                            return
-                        if "v1/responses" in low or "not a chat model" in low:
+                        else:
                             yield from _stream_openai_responses(base, label, model, conv, key)
-                            return
+                        return
                     yield _nd({"error": detail, "done": True})
                     return
                 for raw in up.iter_lines():
