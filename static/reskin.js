@@ -465,15 +465,19 @@
       pill.appendChild(btn); pill.appendChild(menu); box.appendChild(pill);
     });
   }
+  function arenaItem(id) { for (var i = 0; i < state.arena.length; i++) if (state.arena[i].id === id) return state.arena[i]; return null; }
+  function arenaCardEl(id) { return document.querySelector('#arenaGrid .arena-card[data-id="' + id + '"]'); }
   function addArenaModel(name, provider, installed) {
     if (!provider && installed === false) startPull(name); // download the local model first
-    state.arena.push({ name: name, provider: provider || "" });
+    state._arenaSeq = (state._arenaSeq || 0) + 1;
+    state.arena.push({ id: "a" + state._arenaSeq, name: name, provider: provider || "", messages: [], busy: false });
     renderArenaCards();
-    window.showToast && window.showToast("Added " + name.split(":")[0] + " to the race");
+    window.showToast && window.showToast("Added " + name.split(":")[0] + " to the arena");
   }
-  function closeArenaModel(i) {
-    var m = state.arena[i]; if (!m) return;
-    state.arena.splice(i, 1); renderArenaCards();
+  function closeArenaModel(id) {
+    var idx = -1; for (var i = 0; i < state.arena.length; i++) if (state.arena[i].id === id) { idx = i; break; }
+    if (idx < 0) return;
+    var m = state.arena[idx]; state.arena.splice(idx, 1); renderArenaCards();
     if (!m.provider) {
       fetch("/api/stop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: m.name }) })
         .then(function () { window.showToast && window.showToast(m.name.split(":")[0] + " closed · unloaded from Ollama"); }).catch(function () {});
@@ -482,62 +486,92 @@
   function renderArenaCards() {
     var grid = $("arenaGrid"); if (!grid) return;
     var n = state.arena.length;
-    grid.className = "arena-grid cols-" + Math.min(Math.max(n, 1), 3);
+    grid.className = "arena-grid cols-" + Math.min(Math.max(n, 1), 4);
     grid.innerHTML = "";
-    if (!n) { grid.innerHTML = '<div class="arena-empty">No models in the race yet.<br>Add some from the provider menus above, then Broadcast a prompt.</div>'; return; }
-    state.arena.forEach(function (m, i) {
+    if (!n) { grid.innerHTML = '<div class="arena-empty">No models in the arena yet.<br>Add some from the provider menus above, then Broadcast a prompt — or chat each one directly.</div>'; return; }
+    state.arena.forEach(function (m) {
       var col = colorFor(m.name);
-      var c = document.createElement("div"); c.className = "arena-card glass"; c.style.setProperty("--mc", col);
-      var head = document.createElement("div"); head.className = "arena-card-head";
-      head.innerHTML = '<span class="ach-model"><span class="ac-dot" style="background:' + col + '"></span><span class="mname-t">' + m.name + '</span>' + (m.provider ? '<span class="ach-cloud">☁</span>' : '') + '</span>';
-      var close = document.createElement("button"); close.className = "arena-close"; close.title = m.provider ? "Remove from race" : "Close & unload from Ollama"; close.textContent = "✕";
-      close.addEventListener("click", function () { closeArenaModel(i); });
-      head.appendChild(close);
-      c.appendChild(head);
-      c.insertAdjacentHTML("beforeend", '<div class="lane"><div class="lane-fill" style="width:0%;background:' + col + '"></div></div><div class="arena-out arena-out-idle">idle — broadcast a prompt</div><div class="arena-foot">' + (m.provider ? "cloud · " + m.provider : "local") + '</div>');
+      var c = document.createElement("div"); c.className = "arena-card glass"; c.style.setProperty("--mc", col); c.dataset.id = m.id;
+      c.innerHTML =
+        '<div class="arena-card-head"><span class="ach-model"><span class="ac-dot" style="background:' + col + '"></span><span class="mname-t">' + m.name + '</span>' + (m.provider ? '<span class="ach-cloud">☁</span>' : '') + '</span><span class="ach-meta"></span><button class="arena-close" title="' + (m.provider ? "Remove from arena" : "Close &amp; unload from Ollama") + '">✕</button></div>' +
+        '<div class="lane"><div class="lane-fill" style="width:0%;background:' + col + '"></div></div>' +
+        '<div class="arena-convo"></div>' +
+        '<div class="arena-cinput"><textarea rows="1" placeholder="Ask ' + esc(m.name.split(":")[0]) + '…"></textarea><button class="arena-send" title="Send to this model"><svg viewBox="0 0 24 24" fill="#0a1020"><path d="M3.4 20.4 21 12 3.4 3.6 3.39 10.2 15 12l-11.61 1.8z"/></svg></button></div>';
+      c.querySelector(".arena-close").addEventListener("click", function () { closeArenaModel(m.id); });
+      var ta = c.querySelector("textarea"), sb = c.querySelector(".arena-send");
+      function doSend() { var v = (ta.value || "").trim(); if (!v) return; ta.value = ""; ta.style.height = ""; sendToArenaModel(m.id, v); }
+      sb.addEventListener("click", doSend);
+      ta.addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSend(); } });
+      ta.addEventListener("input", function () { ta.style.height = ""; ta.style.height = Math.min(ta.scrollHeight, 80) + "px"; });
       grid.appendChild(c);
+      renderArenaConvo(m.id);
     });
+  }
+  function renderArenaConvo(id) {
+    var card = arenaCardEl(id), m = arenaItem(id); if (!card || !m) return;
+    var convo = card.querySelector(".arena-convo");
+    if (!m.messages.length) { convo.innerHTML = '<div class="arena-out-idle">Broadcast a prompt, or ask this model directly below.</div>'; return; }
+    convo.innerHTML = m.messages.map(function (msg) {
+      if (msg.role === "user") { var d = document.createElement("div"); d.className = "arena-msg-u"; d.textContent = msg.content; return d.outerHTML; }
+      return '<div class="arena-msg-a">' + (msg.content ? renderMd(msg.content) : '<span class="cursor"></span>') + '</div>';
+    }).join("");
+    convo.scrollTop = convo.scrollHeight;
+  }
+  function sendToArenaModel(id, text) {
+    var m = arenaItem(id); if (!m || m.busy) return;
+    m.messages.push({ role: "user", content: text });
+    streamArena(id);
+  }
+  function streamArena(id) {
+    var m = arenaItem(id); if (!m) return;
+    var payloadMsgs = m.messages.map(function (x) { return { role: x.role, content: x.content }; });
+    var assistant = { role: "assistant", content: "" }; m.messages.push(assistant); m.busy = true;
+    renderArenaConvo(id);
+    var card = arenaCardEl(id);
+    var fill = card && card.querySelector(".lane-fill"), meta = card && card.querySelector(".ach-meta");
+    if (meta) meta.textContent = "…";
+    var tFirst = 0, tLast = 0;
+    function setRate() { if (meta && tLast > tFirst) { var w = assistant.content.trim() ? assistant.content.trim().split(/\s+/).length : 0; meta.textContent = Math.round(w / ((tLast - tFirst) / 1000)) + " w/s"; } }
+    var payload = { model: m.name, messages: payloadMsgs, options: {} };
+    if (m.provider) payload.provider = m.provider;
+    fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+      .then(function (res) {
+        var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
+        function pump() {
+          return reader.read().then(function (r) {
+            if (r.done) { m.busy = false; if (fill) fill.style.width = "100%"; setRate(); renderArenaConvo(id); return; }
+            buf += dec.decode(r.value, { stream: true });
+            var lines = buf.split("\n"); buf = lines.pop();
+            lines.forEach(function (line) {
+              if (!line.trim()) return; var o; try { o = JSON.parse(line); } catch (e) { return; }
+              if (o.error) { assistant.content += "\n\n_" + o.error + "_"; }
+              var msg = o.message || {};
+              if (msg.content) { if (!tFirst) tFirst = Date.now(); tLast = Date.now(); assistant.content += msg.content; if (fill) fill.style.width = Math.min(96, 8 + assistant.content.length / 6) + "%"; setRate(); renderArenaConvo(id); }
+            });
+            return pump();
+          });
+        }
+        return pump();
+      }).catch(function (e) { m.busy = false; if (e.name !== "AbortError") { assistant.content += "\n\n_request failed_"; renderArenaConvo(id); } });
   }
   function broadcastArena() {
     var promptEl = $("arenaPrompt"), prompt = (promptEl && promptEl.value || "").trim();
     if (!prompt) { promptEl && promptEl.focus(); return; }
-    if (!state.arena.length) { window.showToast && window.showToast("Add models to the race first"); return; }
-    var cards = document.querySelectorAll("#arenaGrid .arena-card");
-    var finishOrder = [];
+    if (!state.arena.length) { window.showToast && window.showToast("Add models to the arena first"); return; }
+    state.arena.forEach(function (m) { m.messages.push({ role: "user", content: prompt }); streamArena(m.id); });
+    if (promptEl) promptEl.value = "";
+  }
+  function crossPollinate() {
+    if (state.arena.length < 2) { window.showToast && window.showToast("Add at least 2 models to cross-pollinate"); return; }
+    var answers = state.arena.map(function (m) { var last = ""; m.messages.forEach(function (x) { if (x.role === "assistant" && x.content) last = x.content; }); return { name: m.name, text: last }; });
+    if (answers.filter(function (a) { return a.text; }).length < 2) { window.showToast && window.showToast("Need at least 2 answers first — Broadcast a prompt"); return; }
     state.arena.forEach(function (m, i) {
-      var card = cards[i]; if (!card) return;
-      var out = card.querySelector(".arena-out"), fill = card.querySelector(".lane-fill"), foot = card.querySelector(".arena-foot");
-      card.classList.remove("win"); out.textContent = ""; out.classList.remove("arena-out-idle"); foot.textContent = "running…";
-      var acc = "", t0 = Date.now();
-      function wc() { return acc.trim() ? acc.trim().split(/\s+/).length : 0; }
-      var payload = { model: m.name, messages: [{ role: "user", content: prompt }], options: {} };
-      if (m.provider) payload.provider = m.provider;
-      fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
-        .then(function (res) {
-          var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
-          function pump() {
-            return reader.read().then(function (r) {
-              if (r.done) {
-                var s = (Date.now() - t0) / 1000;
-                foot.textContent = "✓ " + s.toFixed(1) + "s · " + wc() + " words · " + (wc() / Math.max(s, 0.1)).toFixed(0) + " w/s";
-                fill.style.width = "100%";
-                if (acc.trim()) { finishOrder.push(i); if (finishOrder.length === 1) { card.classList.add("win"); } }
-                return;
-              }
-              buf += dec.decode(r.value, { stream: true });
-              var lines = buf.split("\n"); buf = lines.pop();
-              lines.forEach(function (line) {
-                if (!line.trim()) return; var o; try { o = JSON.parse(line); } catch (e) { return; }
-                if (o.error) { out.textContent = "⚠ " + o.error; foot.textContent = "error"; return; }
-                var msg = o.message || {};
-                if (msg.content) { acc += msg.content; out.textContent = acc; var s = (Date.now() - t0) / 1000; foot.textContent = (wc() / Math.max(s, 0.1)).toFixed(0) + " w/s"; fill.style.width = Math.min(96, 8 + acc.length / 6) + "%"; }
-              });
-              return pump();
-            });
-          }
-          return pump();
-        }).catch(function (e) { if (e.name !== "AbortError") { out.textContent = "⚠ request failed"; foot.textContent = "error"; } });
+      var others = answers.filter(function (a, j) { return j !== i && a.text; }).map(function (a) { return "## " + a.name + " answered:\n" + a.text; }).join("\n\n");
+      if (!others) return;
+      m.messages.push({ role: "user", content: "Here are the other models' answers to the same question:\n\n" + others + "\n\nReconsider your own answer in light of theirs. Keep what you got right, correct anything wrong, and give your best final answer." });
+      streamArena(m.id);
     });
+    window.showToast && window.showToast("Cross-pollinating " + state.arena.length + " models");
   }
 
   // ---------- init ----------
@@ -552,6 +586,7 @@
     if ($("convoSearch")) $("convoSearch").addEventListener("input", renderConvos);
     if ($("filesToggle")) $("filesToggle").addEventListener("click", loadFiles);
     if ($("arenaBroadcast")) $("arenaBroadcast").addEventListener("click", broadcastArena);
+    if ($("arenaCross")) $("arenaCross").addEventListener("click", crossPollinate);
     if ($("arenaPrompt")) $("arenaPrompt").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); broadcastArena(); } });
     document.addEventListener("mousedown", function (e) { if (!e.target.closest(".arena-pill")) closeArenaPills(); });
     renderArenaCards();
