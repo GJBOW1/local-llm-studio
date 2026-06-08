@@ -23,6 +23,7 @@ if os.path.exists(_ollama_src):
 datas = [
     ("templates", "templates"),
     ("static", "static"),  # includes static/vendor (mermaid, chart.js)
+    ("secondbrain", "secondbrain"),  # RAG build/query scripts (the graph itself is baked into app.py)
 ]
 
 hiddenimports = (

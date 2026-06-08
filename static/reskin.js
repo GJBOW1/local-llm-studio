@@ -642,6 +642,17 @@
     state.arena.forEach(function (m) { m.messages.push({ role: "user", content: prompt }); streamArena(m.id); });
     if (promptEl) promptEl.value = "";
   }
+  function setCastLabel(text) { var el = $("castLabel"); if (el) el.textContent = text; var b = $("arenaBroadcast"); if (b) b.title = text === "Steer" ? "Steer the collaboration — add context or new instructions for the agents to factor into the next round" : ""; }
+  // During a collaboration, the Broadcast button becomes "Steer": the user feeds extra
+  // context / new instructions that the agents factor into the next round.
+  function steerCollab() {
+    var el = $("arenaPrompt"), v = (el && el.value || "").trim();
+    if (!v) { window.showToast && window.showToast("Type guidance for the agents, then hit Steer"); el && el.focus(); return; }
+    _steering.push(v); if (el) el.value = "";
+    state.arena.forEach(function (m) { m.messages.push({ role: "user", content: "🧭 You steered: " + v }); renderArenaConvo(m.id); });
+    window.showToast && window.showToast("Steering noted — the agents will factor it into the next round.");
+  }
+  function broadcastOrSteer() { if (_collabOn) steerCollab(); else broadcastArena(); }
   function crossPollinate() {
     if (state.arena.length < 2) { window.showToast && window.showToast("Add at least 2 models to cross-pollinate"); return; }
     var answers = state.arena.map(function (m) { var last = ""; m.messages.forEach(function (x) { if (x.role === "assistant" && x.content) last = x.content; }); return { name: m.name, text: last }; });
@@ -795,7 +806,7 @@
     var decision = (/\bdone\b/i.test(next) && !/\bedit\b/i.test(next)) ? "DONE" : (hasChange || /edit/i.test(next) ? "EDIT" : "DONE");
     return { decision: decision, edit: change, reason: grab("WHY") || "(no reason given)" };
   }
-  var _collabOn = false;
+  var _collabOn = false, _steering = [];
   function autoCollaborate() {
     if (_collabOn) return;
     if (state.userPen) { window.showToast && window.showToast("You hold the pen — click the pen above the document to let the models collaborate."); return; }
@@ -822,16 +833,19 @@
     // until everyone votes done. Only the pen-holder can edit in a given round, so the
     // models coordinate instead of all editing at once.
     if ($("arenaPrompt")) $("arenaPrompt").value = "";
-    _collabOn = true; var btn = $("arenaCollab"); if (btn) btn.classList.add("on");
+    _collabOn = true; _steering = []; var btn = $("arenaCollab"); if (btn) btn.classList.add("on");
+    setCastLabel("Steer");   // Broadcast → Steer while collaborating
+    window.showToast && window.showToast("Collaborating — type into the prompt and hit Steer anytime to add guidance.");
     var history = [], lastHolder = null, MAX = 8;
-    function finish(msg) { _collabOn = false; if (btn) btn.classList.remove("on"); window.showToast && window.showToast("Collaboration finished — " + msg); }
+    function finish(msg) { _collabOn = false; if (btn) btn.classList.remove("on"); setCastLabel("Broadcast"); window.showToast && window.showToast("Collaboration finished — " + msg); }
     function round(n) {
       if (n > MAX) return finish("reached the round limit.");
       state.penHolder = null;   // nobody holds the pen while the group is voting/proposing
       var hist = history.length ? "What the group has done so far:\n" + history.slice(-6).join("\n") + "\n\n" : "";
+      var steer = _steering.length ? "  ▶ THE USER HAS STEERED THE TASK — keep going, but factor in this added guidance / change of direction: " + _steering.join("  |  ") + "\n\n" : "";
       var prompt =
         "You and the other AI models are collaborating on the document open in the viewer (its current text is in your context). Carry out the user's request below by taking turns editing it — only ONE model edits per round, so this round just PROPOSE and vote; don't edit yet.\n\n" +
-        "  ▶ USER'S REQUEST: " + goal + "\n\n" + hist +
+        "  ▶ USER'S REQUEST: " + goal + "\n\n" + steer + hist +
         "If another edit is still needed to satisfy the request, propose ONE specific edit; if it's already fully satisfied, vote done.\n\n" +
         "Reply in EXACTLY this format and nothing else:\n" +
         "NEXT: edit   (or)   NEXT: done\n" +
@@ -943,7 +957,7 @@
     if ($("newChat")) $("newChat").addEventListener("click", newChat);
     if ($("convoSearch")) $("convoSearch").addEventListener("input", renderConvos);
     if ($("filesToggle")) $("filesToggle").addEventListener("click", loadFiles);
-    if ($("arenaBroadcast")) $("arenaBroadcast").addEventListener("click", broadcastArena);
+    if ($("arenaBroadcast")) $("arenaBroadcast").addEventListener("click", broadcastOrSteer);
     if ($("arenaCross")) $("arenaCross").addEventListener("click", crossPollinate);
     if ($("arenaCollab")) $("arenaCollab").addEventListener("click", autoCollaborate);
     if ($("arenaDocBtn")) $("arenaDocBtn").addEventListener("click", toggleDoc);

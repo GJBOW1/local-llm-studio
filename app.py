@@ -892,7 +892,12 @@ def api_graph() -> Response:
         with open(RAG_GRAPH, encoding="utf-8") as f:
             g = json.load(f)
     except (OSError, ValueError):
-        return jsonify({"available": False, "nodes": [], "links": []})
+        _build_graph(VAULT_ROOT)   # baked-in: build it on demand if it hasn't been generated yet
+        try:
+            with open(RAG_GRAPH, encoding="utf-8") as f:
+                g = json.load(f)
+        except (OSError, ValueError):
+            return jsonify({"available": False, "nodes": [], "links": []})
     nodes = [
         {"id": n.get("id"), "label": n.get("label") or n.get("id"),
          "community": n.get("community", 0), "type": n.get("file_type", ""),
@@ -965,10 +970,80 @@ def _ensure_rag_setup() -> bool:
         return False
 
 
+_WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
+
+
+def _build_graph(vault: str) -> tuple[int, int]:
+    """Baked-in wikilink knowledge graph — ported from secondbrain/graphify.py so it's pure
+    stdlib (no venv/subprocess/extra deps) and ships compiled into the frozen app. Walks the
+    vault's .md files, builds nodes + links from [[wikilinks]], and writes RAG_GRAPH. Called
+    when the vault path is set and at startup. Returns (nodes, links); (0, 0) on any failure."""
+    try:
+        wiki_real = os.path.realpath(os.path.join(vault, "wiki"))
+        info: dict[str, dict[str, Any]] = {}
+        by_stem: dict[str, str] = {}
+        for root, _dirs, files in os.walk(vault):
+            for fn in files:
+                if not fn.endswith(".md"):
+                    continue
+                p = os.path.join(root, fn)
+                stem = os.path.splitext(fn)[0]
+                try:
+                    with open(p, encoding="utf-8", errors="ignore") as f:
+                        text = f.read()
+                except OSError:
+                    continue
+                rel = os.path.relpath(p, vault)
+                community = rel.split(os.sep)[0] if os.sep in rel else "root"
+                title = stem
+                fm = re.match(r"^---\n(.*?)\n---", text, re.S)
+                if fm:
+                    tm = re.search(r"^title:\s*(.+)$", fm.group(1), re.M)
+                    if tm:
+                        title = tm.group(1).strip()
+                in_wiki = os.path.realpath(p).startswith(wiki_real + os.sep)
+                info[p] = {"stem": stem, "title": title[:48], "text": text, "community": community,
+                           "source_file": os.path.relpath(p, os.path.join(vault, "wiki")) if in_wiki else ""}
+                by_stem.setdefault(stem, p)
+        comm_idx = {c: i for i, c in enumerate(sorted({r["community"] for r in info.values()}))}
+        links: list[dict[str, Any]] = []
+        deg: dict[str, int] = {}
+        seen: set[tuple[str, str]] = set()
+        for p, r in info.items():
+            for m in _WIKILINK_RE.finditer(r["text"]):
+                target = m.group(1).strip()
+                tp = by_stem.get(target) or by_stem.get(os.path.splitext(target)[0])
+                if not tp or tp == p:
+                    continue
+                s, t = r["stem"], info[tp]["stem"]
+                if s == t or (s, t) in seen:
+                    continue
+                seen.add((s, t))
+                links.append({"source": s, "target": t, "relation": "links to", "confidence_score": 1})
+                deg[s] = deg.get(s, 0) + 1
+                deg[t] = deg.get(t, 0) + 1
+        best: dict[str, dict[str, Any]] = {}
+        for r in info.values():
+            node = {"id": r["stem"], "label": r["title"], "community": comm_idx[r["community"]],
+                    "source_file": r["source_file"], "_deg": deg.get(r["stem"], 0)}
+            if r["stem"] not in best or node["_deg"] > best[r["stem"]]["_deg"]:
+                best[r["stem"]] = node
+        nodes = sorted(best.values(), key=lambda n: -n["_deg"])
+        for n in nodes:
+            n.pop("_deg", None)
+        os.makedirs(os.path.dirname(RAG_GRAPH), exist_ok=True)
+        with open(RAG_GRAPH, "w", encoding="utf-8") as f:
+            json.dump({"nodes": nodes, "links": links}, f)
+        return len(nodes), len(links)
+    except Exception:
+        return 0, 0
+
+
 def _run_reindex(vault: str) -> None:
     """Background worker: rebuild the vault index, recording progress in _INDEXING."""
     global _INDEXING
     _INDEXING = {"running": True, "error": "", "notes": 0}
+    _build_graph(vault)   # baked-in wikilink graph — fast + dependency-free, refreshes the graph right away
     try:
         if not _ensure_rag_setup():
             _INDEXING = {"running": False, "error": "Could not set up the index tool.", "notes": 0}
@@ -976,14 +1051,7 @@ def _run_reindex(vault: str) -> None:
         env = {**os.environ, "LLS_VAULT_ROOT": vault}
         proc = subprocess.run([RAG_PYTHON, RAG_BUILD], env=env, cwd=RAG_DIR,
                               capture_output=True, text=True, timeout=1800)
-        # Also rebuild the wikilink knowledge graph (fast; non-fatal if it fails).
-        graphify = os.path.join(RAG_DIR, "graphify.py")
-        if os.path.exists(graphify):
-            try:
-                subprocess.run([RAG_PYTHON, graphify], env=env, cwd=RAG_DIR,
-                               capture_output=True, timeout=300)
-            except subprocess.SubprocessError:
-                pass
+        _build_graph(vault)   # refresh the graph again after embeddings (cheap)
         notes = 0
         try:
             with open(RAG_INDEX, encoding="utf-8") as f:
@@ -996,6 +1064,11 @@ def _run_reindex(vault: str) -> None:
             _INDEXING = {"running": False, "error": "", "notes": notes}
     except Exception as exc:  # noqa: BLE001 — surface any failure to the UI, never crash the worker
         _INDEXING = {"running": False, "error": str(exc)[:300], "notes": 0}
+
+
+# Refresh the knowledge graph for the current vault when the app opens (background,
+# non-blocking, dependency-free) — so the graph is current every time the app launches.
+threading.Thread(target=lambda: _build_graph(VAULT_ROOT), daemon=True).start()
 
 
 @app.get("/api/secondbrain/config")
