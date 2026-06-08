@@ -2053,7 +2053,27 @@ def chat() -> Response:
         "\n\nThe current date and time is "
         + datetime.now().astimezone().strftime("%A, %B %d, %Y at %I:%M %p %Z") + "."
     )
-    system_extra = date_line + context
+    # Tell the model its real deployment identifier — models guess their own version
+    # wrong (e.g. Gemini 2.5 Pro calling itself "1.5 Pro"), which confuses users.
+    _mid = str(data.get("model", ""))
+    _plabel = {
+        "anthropic": "Anthropic (Claude)", "openai": "OpenAI",
+        "gemini": "Google (Gemini)", "grok": "xAI (Grok)",
+    }.get(str(data.get("provider", "")).lower(), "")
+    if _plabel:
+        identity_line = (
+            "\n\nYou are the model '" + _mid + "' from " + _plabel + ", accessed via its "
+            "official API from inside Local LLM Studio. If asked which model you are, state "
+            "exactly '" + _mid + "' — do not guess or claim a different or older version."
+        )
+    elif _mid:
+        identity_line = (
+            "\n\nYou are the local model '" + _mid + "', running on the user's own machine "
+            "via Ollama inside Local LLM Studio. If asked which model you are, state exactly '" + _mid + "'."
+        )
+    else:
+        identity_line = ""
+    system_extra = date_line + identity_line + context
     # Inject the open shared document so every model can READ it (only the
     # pen-holder gets the edit tool, below).
     if OPEN_DOC["path"]:
