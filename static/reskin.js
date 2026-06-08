@@ -633,6 +633,32 @@
     window.showToast && window.showToast("Cross-pollinating " + state.arena.length + " models");
   }
 
+  // ---------- Second brain (connect an Obsidian vault from Settings) ----------
+  function renderSecondBrain() {
+    var vaultEl = $("sbVault"); if (!vaultEl) return;
+    fetch("/api/secondbrain/config").then(function (r) { return r.json(); }).then(function (d) {
+      if (document.activeElement !== vaultEl) vaultEl.value = d.vault || "";
+      var st = $("sbStatus"), stat = $("sbStat"), note = $("sbNote");
+      if (d.indexing) { st.textContent = " · indexing…"; stat.textContent = "indexing"; stat.className = "cloudp-stat"; }
+      else if (d.available && d.notes) { st.textContent = " · " + d.notes + " notes indexed"; stat.textContent = "connected"; stat.className = "cloudp-stat connected"; }
+      else if (d.error) { st.textContent = " · error"; stat.textContent = "error"; stat.className = "cloudp-stat"; if (note) note.textContent = d.error; }
+      else { st.textContent = " · not indexed yet"; stat.textContent = "not connected"; stat.className = "cloudp-stat"; }
+      if (d.indexing && !state._sbPoll) state._sbPoll = setInterval(renderSecondBrain, 2500);
+      if (!d.indexing && state._sbPoll) { clearInterval(state._sbPoll); state._sbPoll = null; if (d.notes) window.showToast && window.showToast("Vault indexed · " + d.notes + " notes"); }
+    }).catch(function () {});
+  }
+  function connectVault() {
+    var vaultEl = $("sbVault"), vault = (vaultEl.value || "").trim();
+    if (!vault) { vaultEl.focus(); return; }
+    var btn = $("sbConnect"); btn.textContent = "…"; btn.disabled = true;
+    fetch("/api/secondbrain/connect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vault: vault }) })
+      .then(function (r) { return r.json(); }).then(function (d) {
+        btn.textContent = "Connect & index"; btn.disabled = false;
+        if (d.ok) { window.showToast && window.showToast("Indexing " + d.notes_found + " notes…"); renderSecondBrain(); }
+        else { window.showToast && window.showToast(d.error || "Couldn't connect"); var st = $("sbStatus"); if (st) st.textContent = " · " + (d.error || ""); }
+      }).catch(function () { btn.textContent = "Connect & index"; btn.disabled = false; });
+  }
+
   // ---------- init ----------
   function init() {
     var inputEl = $("input"), sendBtn = $("send");
@@ -646,6 +672,9 @@
     if ($("filesToggle")) $("filesToggle").addEventListener("click", loadFiles);
     if ($("arenaBroadcast")) $("arenaBroadcast").addEventListener("click", broadcastArena);
     if ($("arenaCross")) $("arenaCross").addEventListener("click", crossPollinate);
+    if ($("sbConnect")) $("sbConnect").addEventListener("click", connectVault);
+    if ($("openSettings")) $("openSettings").addEventListener("click", renderSecondBrain);
+    renderSecondBrain();
     if ($("arenaPrompt")) $("arenaPrompt").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); broadcastArena(); } });
     document.addEventListener("mousedown", function (e) { if (!e.target.closest(".arena-pill")) closeArenaPills(); });
     renderArenaCards();

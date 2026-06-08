@@ -125,6 +125,11 @@ if "LLS_RAG_MIN_SCORE" not in os.environ and "LLS_RAG_MIN_SCORE" in _LOCAL_CONFI
         RAG_MIN_SCORE = float(_LOCAL_CONFIG["LLS_RAG_MIN_SCORE"])
     except (TypeError, ValueError):
         pass  # keep the code default if the config value is malformed
+# The connected vault is also config-driven (set from Settings → Second brain), so a
+# GUI user can point at their own Obsidian vault without editing code or env vars.
+if "LLS_VAULT_ROOT" not in os.environ and _LOCAL_CONFIG.get("LLS_VAULT_ROOT"):
+    VAULT_ROOT = _LOCAL_CONFIG["LLS_VAULT_ROOT"]
+    VAULT_WIKI = os.path.join(VAULT_ROOT, "wiki")
 
 
 def _save_local_config_key(name: str, value: str) -> None:
@@ -761,6 +766,98 @@ def api_secondbrain_health() -> Response:
     except (OSError, ValueError):
         pass
     return jsonify(info)
+
+
+# --- Connect / index an Obsidian vault (Settings → Second brain) -------------
+RAG_BUILD: str = os.path.join(RAG_DIR, "build.py")
+_SECONDBRAIN_SRC: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "secondbrain")
+_INDEXING: dict[str, Any] = {"running": False, "error": "", "notes": 0}
+
+
+def _ensure_rag_setup() -> bool:
+    """Make sure the local index tool (~/skippy-rag) exists, recreating its scripts
+    and venv from the repo's secondbrain/ copies if they were lost."""
+    try:
+        os.makedirs(RAG_DIR, exist_ok=True)
+        for name in ("build.py", "query.py"):
+            src, dst = os.path.join(_SECONDBRAIN_SRC, name), os.path.join(RAG_DIR, name)
+            if os.path.exists(src) and not os.path.exists(dst):
+                shutil.copy(src, dst)
+        if not os.path.exists(RAG_PYTHON):
+            subprocess.run([sys.executable, "-m", "venv", os.path.join(RAG_DIR, ".venv")],
+                           capture_output=True, timeout=180)
+        return os.path.exists(RAG_BUILD) and os.path.exists(RAG_PYTHON)
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _run_reindex(vault: str) -> None:
+    """Background worker: rebuild the vault index, recording progress in _INDEXING."""
+    global _INDEXING
+    _INDEXING = {"running": True, "error": "", "notes": 0}
+    try:
+        if not _ensure_rag_setup():
+            _INDEXING = {"running": False, "error": "Could not set up the index tool.", "notes": 0}
+            return
+        env = {**os.environ, "LLS_VAULT_ROOT": vault}
+        proc = subprocess.run([RAG_PYTHON, RAG_BUILD], env=env, cwd=RAG_DIR,
+                              capture_output=True, text=True, timeout=1800)
+        notes = 0
+        try:
+            with open(RAG_INDEX, encoding="utf-8") as f:
+                notes = len(json.load(f))
+        except (OSError, ValueError):
+            pass
+        if proc.returncode != 0 and notes == 0:
+            _INDEXING = {"running": False, "error": (proc.stderr or "indexing failed")[-300:], "notes": 0}
+        else:
+            _INDEXING = {"running": False, "error": "", "notes": notes}
+    except Exception as exc:  # noqa: BLE001 — surface any failure to the UI, never crash the worker
+        _INDEXING = {"running": False, "error": str(exc)[:300], "notes": 0}
+
+
+@app.get("/api/secondbrain/config")
+def api_secondbrain_config() -> Response:
+    """Current vault path + index health + whether a (re)index is in progress."""
+    notes, reindexed, available = 0, None, False
+    try:
+        st = os.stat(RAG_INDEX)
+        with open(RAG_INDEX, encoding="utf-8") as f:
+            available, notes = True, len(json.load(f))
+        reindexed = datetime.fromtimestamp(st.st_mtime).astimezone().isoformat()
+    except (OSError, ValueError):
+        pass
+    return jsonify({
+        "vault": VAULT_ROOT,
+        "available": available,
+        "notes": notes,
+        "reindexed": reindexed,
+        "embed_model": RAG_MODEL,
+        "indexing": _INDEXING.get("running", False),
+        "error": _INDEXING.get("error", ""),
+    })
+
+
+@app.post("/api/secondbrain/connect")
+def api_secondbrain_connect() -> Response:
+    """Point the second brain at an Obsidian vault: validate, persist the path to
+    config.local.json, and (re)build the index in the background."""
+    global VAULT_ROOT, VAULT_WIKI
+    data: dict[str, Any] = request.get_json(silent=True) or {}
+    vault = os.path.expanduser(str(data.get("vault", "")).strip())
+    if not vault or not os.path.isdir(vault):
+        return jsonify({"ok": False, "error": "That folder doesn't exist on this Mac."}), 400
+    md_count = 0
+    for _root, _dirs, files in os.walk(vault):
+        md_count += sum(1 for fn in files if fn.endswith(".md"))
+    if md_count == 0:
+        return jsonify({"ok": False, "error": "No Markdown (.md) notes found in that folder."}), 400
+    if _INDEXING.get("running"):
+        return jsonify({"ok": False, "error": "An index build is already running."}), 409
+    VAULT_ROOT, VAULT_WIKI = vault, os.path.join(vault, "wiki")
+    _save_local_config_key("LLS_VAULT_ROOT", vault)
+    threading.Thread(target=_run_reindex, args=(vault,), daemon=True).start()
+    return jsonify({"ok": True, "vault": vault, "notes_found": md_count, "indexing": True})
 
 
 _TEXT_EXTS = frozenset({

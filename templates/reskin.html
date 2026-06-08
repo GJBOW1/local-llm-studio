@@ -248,6 +248,22 @@
       </div>
 
       <div class="set-sec">
+        <h4>Second brain <small style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">· ground answers in your Obsidian vault</small></h4>
+        <div class="cloudp">
+          <div class="cloudp-top">
+            <span class="cloudp-lg" style="background:#7a5fcf">◈</span>
+            <span class="cloudp-name">Obsidian vault<small id="sbStatus">checking…</small></span>
+            <span class="cloudp-stat" id="sbStat"></span>
+          </div>
+          <div class="cloudp-row">
+            <input id="sbVault" type="text" placeholder="/path/to/your/vault" spellcheck="false" />
+            <button class="cloudp-btn" id="sbConnect">Connect &amp; index</button>
+          </div>
+          <div id="sbNote" style="font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.5">Indexes your notes locally (nomic-embed-text). Private notes are never sent to cloud models. Re-index after adding notes.</div>
+        </div>
+      </div>
+
+      <div class="set-sec">
         <h4>Server</h4>
         <div class="set-row"><div class="sl">Port</div><input class="set-input" value="5050"/></div>
       </div>
