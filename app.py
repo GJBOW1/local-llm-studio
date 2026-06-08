@@ -779,7 +779,7 @@ def _ensure_rag_setup() -> bool:
     and venv from the repo's secondbrain/ copies if they were lost."""
     try:
         os.makedirs(RAG_DIR, exist_ok=True)
-        for name in ("build.py", "query.py"):
+        for name in ("build.py", "query.py", "graphify.py"):
             src, dst = os.path.join(_SECONDBRAIN_SRC, name), os.path.join(RAG_DIR, name)
             if os.path.exists(src) and not os.path.exists(dst):
                 shutil.copy(src, dst)
@@ -802,6 +802,14 @@ def _run_reindex(vault: str) -> None:
         env = {**os.environ, "LLS_VAULT_ROOT": vault}
         proc = subprocess.run([RAG_PYTHON, RAG_BUILD], env=env, cwd=RAG_DIR,
                               capture_output=True, text=True, timeout=1800)
+        # Also rebuild the wikilink knowledge graph (fast; non-fatal if it fails).
+        graphify = os.path.join(RAG_DIR, "graphify.py")
+        if os.path.exists(graphify):
+            try:
+                subprocess.run([RAG_PYTHON, graphify], env=env, cwd=RAG_DIR,
+                               capture_output=True, timeout=300)
+            except subprocess.SubprocessError:
+                pass
         notes = 0
         try:
             with open(RAG_INDEX, encoding="utf-8") as f:

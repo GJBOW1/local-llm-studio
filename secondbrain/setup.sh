@@ -18,11 +18,14 @@ fi
 
 echo "==> Installing scripts into $RAG_DIR"
 mkdir -p "$RAG_DIR"
-cp "$HERE/query.py" "$HERE/build.py" "$RAG_DIR/"
+cp "$HERE/query.py" "$HERE/build.py" "$HERE/graphify.py" "$RAG_DIR/"
 [ -x "$RAG_DIR/.venv/bin/python" ] || python3 -m venv "$RAG_DIR/.venv"
 
 echo "==> Building the index (embeds every vault note; a few minutes)"
 "$RAG_DIR/.venv/bin/python" "$RAG_DIR/build.py"
+
+echo "==> Building the wikilink knowledge graph"
+"$RAG_DIR/.venv/bin/python" "$RAG_DIR/graphify.py"
 
 echo "==> Done. Verify:"
 echo "   curl -s http://127.0.0.1:5050/api/secondbrain/health"
