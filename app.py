@@ -387,6 +387,9 @@ _IMG_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".ico")
 _VID_EXTS = (".mp4", ".webm", ".mov", ".m4v", ".ogg")
 
 
+_OFFICE_EXTS = {".docx": "docx", ".pptx": "pptx", ".xlsx": "xlsx"}
+
+
 def _doc_kind(path: str, is_text: bool) -> str:
     ext = os.path.splitext(path)[1].lower()
     if ext in _MD_EXTS:
@@ -395,6 +398,8 @@ def _doc_kind(path: str, is_text: bool) -> str:
         return "image"
     if ext == ".pdf":
         return "pdf"
+    if ext in _OFFICE_EXTS:
+        return _OFFICE_EXTS[ext]
     if ext in _VID_EXTS:
         return "video"
     return "text" if is_text else "binary"
@@ -467,6 +472,35 @@ def _apply_doc_edit(find: str, replace: str) -> str:
         return f"Could not write the document: {exc}"
     OPEN_DOC["content"] = new
     return "Document updated."
+
+
+SAVE_DOCUMENT_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "save_document",
+        "description": (
+            "Save the shared document to disk. Edits are already written as you make "
+            "them, so call this to confirm the group is finished and the document is "
+            "final (the user also has a Save button)."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+}
+
+
+def _save_open_doc() -> str:
+    """Persist the open doc's current content to disk (idempotent finalize)."""
+    path = OPEN_DOC["path"]
+    if not path:
+        return "No document is open."
+    if not OPEN_DOC.get("editable"):
+        return "This document type can't be saved from here."
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(OPEN_DOC.get("content", ""))
+    except OSError as exc:
+        return f"Could not save the document: {exc}"
+    return "Document saved."
 
 
 def _dispatch_tool(name: str, args: dict[str, Any]) -> str:
@@ -1396,6 +1430,9 @@ def _execute_tool(name: str, args: dict[str, Any]) -> tuple[str, list[bytes]]:
     if name == "edit_document":
         result = _apply_doc_edit(str(args.get("find") or ""), str(args.get("replace") or ""))
         return result, [_nd({"doc_event": {"updated": result == "Document updated.", "note": result}})]
+    if name == "save_document":
+        result = _save_open_doc()
+        return result, [_nd({"doc_event": {"saved": result == "Document saved.", "note": result}})]
     # Agentic file change with approval required → stage it and show an Approve/
     # Reject card instead of applying. The model can never apply it itself.
     if name in _CRUD_TOOL_NAMES and AGENT_WRITES_ENABLED and AGENT_APPROVAL_REQUIRED:
@@ -2330,7 +2367,7 @@ def chat() -> Response:
     # model is handed the edit tool. Cloud models hold the pen too — their tool loops
     # run edit_document the same way the local loop does.
     if data.get("can_edit_doc") and OPEN_DOC["path"] and OPEN_DOC.get("editable"):
-        tools = tools + [EDIT_DOCUMENT_SCHEMA]
+        tools = tools + [EDIT_DOCUMENT_SCHEMA, SAVE_DOCUMENT_SCHEMA]
 
     body: dict[str, Any] = {
         "model": model, "messages": messages, "stream": True, "keep_alive": KEEP_ALIVE,
@@ -2469,6 +2506,81 @@ def api_doc_raw() -> Response:
     if not p or not os.path.isfile(p):
         return jsonify({"error": "No document open."}), 404
     return send_file(p)
+
+
+_PREVIEW_CSS = (
+    "<style>"
+    "html,body{margin:0}"
+    "body{font:14px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1a2236;background:#fff;padding:22px 26px}"
+    "h1,h2,h3{line-height:1.25;margin:1.1em 0 .4em}img{max-width:100%}"
+    "table{border-collapse:collapse;margin:8px 0 18px;font-size:12.5px}"
+    "td,th{border:1px solid #d4dae6;padding:4px 8px;text-align:left;vertical-align:top}"
+    "tr:nth-child(even) td{background:#f6f8fc}"
+    ".slide{border:1px solid #e1e6f0;border-radius:10px;padding:16px 18px;margin:0 0 14px;box-shadow:0 2px 8px -4px rgba(20,30,60,.15)}"
+    ".sn{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#8b91a8;margin-bottom:8px}"
+    ".muted{color:#8b91a8}"
+    "</style>"
+)
+
+
+def _doc_preview_html() -> tuple[bool, str]:
+    """Render the open Office document to a styled standalone HTML page for preview.
+    docx via mammoth, xlsx via openpyxl, pptx via python-pptx. Returns (ok, html)."""
+    import html as _html
+    path = OPEN_DOC["path"]
+    kind = OPEN_DOC.get("kind", "")
+    if not path or not os.path.isfile(path):
+        return False, "<p>No document open.</p>"
+    try:
+        if kind == "docx":
+            import mammoth
+            with open(path, "rb") as f:
+                body = mammoth.convert_to_html(f).value or "<p class='muted'>(empty document)</p>"
+        elif kind == "xlsx":
+            import openpyxl
+            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+            parts: list[str] = []
+            for ws in wb.worksheets[:15]:
+                parts.append(f"<h3>{_html.escape(ws.title)}</h3><table>")
+                for r, row in enumerate(ws.iter_rows(values_only=True)):
+                    if r > 300:
+                        parts.append("<tr><td>… (truncated)</td></tr>")
+                        break
+                    cells = "".join(
+                        f"<td>{_html.escape('' if v is None else str(v))}</td>" for v in row[:50]
+                    )
+                    parts.append(f"<tr>{cells}</tr>")
+                parts.append("</table>")
+            wb.close()
+            body = "".join(parts) or "<p class='muted'>(empty workbook)</p>"
+        elif kind == "pptx":
+            from pptx import Presentation
+            prs = Presentation(path)
+            parts = []
+            for i, slide in enumerate(prs.slides, 1):
+                texts: list[str] = []
+                for shape in slide.shapes:
+                    if shape.has_text_frame:
+                        for para in shape.text_frame.paragraphs:
+                            t = "".join(run.text for run in para.runs).strip()
+                            if t:
+                                texts.append(_html.escape(t))
+                inner = "".join(f"<p>{t}</p>" for t in texts) or "<p class='muted'>(no text on this slide)</p>"
+                parts.append(f"<section class='slide'><div class='sn'>Slide {i}</div>{inner}</section>")
+            body = "".join(parts) or "<p class='muted'>(no slides)</p>"
+        else:
+            return False, "<p>Preview is not available for this file type.</p>"
+    except Exception as exc:  # degrade gracefully to a readable message
+        return False, f"<p class='muted'>Could not render preview: {_html.escape(str(exc))}</p>"
+    return True, body
+
+
+@app.get("/api/doc/preview")
+def api_doc_preview() -> Response:
+    """Rendered HTML preview of the open Office doc (docx/pptx/xlsx) for an iframe."""
+    ok, body = _doc_preview_html()
+    doc = f"<!doctype html><html><head><meta charset='utf-8'>{_PREVIEW_CSS}</head><body>{body}</body></html>"
+    return jsonify({"ok": ok, "kind": OPEN_DOC.get("kind", ""), "html": doc})
 
 
 @app.post("/api/doc/close")

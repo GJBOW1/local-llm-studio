@@ -668,13 +668,110 @@
     chip.hidden = false;
     if (holder) { var c = colorFor(holder.name); pane.classList.add("held"); pane.style.setProperty("--pen", c); chip.style.setProperty("--pen", c); chip.textContent = "✒ " + holder.name.split(":")[0] + " holds the pen"; }
     else { pane.classList.remove("held"); pane.style.removeProperty("--pen"); chip.style.removeProperty("--pen"); chip.textContent = "read-only · ✒ a card to assign the pen"; }
+    if ($("docSaveBtn")) $("docSaveBtn").style.display = state.doc.editable ? "" : "none";
     if (state.doc.editable) {
+      body.dataset.pkey = "";
       if (!body.querySelector("textarea")) { body.classList.add("editing"); body.innerHTML = '<textarea spellcheck="false"></textarea>'; }
       var ta = body.querySelector("textarea");
       if (document.activeElement !== ta) ta.value = state.doc.content || "";
-    } else { body.classList.remove("editing"); body.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:12.5px">This is a binary/preview file — open a text file to make it editable.</div>'; }
+    } else {
+      body.classList.remove("editing");
+      var k = state.doc.kind || "", key = (state.doc.name || "") + "|" + k;
+      if (body.dataset.pkey !== key) {       // only (re)build when the file/kind changes
+        body.dataset.pkey = key; var bust = "?t=" + Date.now();
+        if (k === "pdf") body.innerHTML = '<iframe class="doc-frame" src="/api/doc/raw' + bust + '"></iframe>';
+        else if (k === "image") body.innerHTML = '<div class="doc-media"><img src="/api/doc/raw' + bust + '" alt=""></div>';
+        else if (k === "video") body.innerHTML = '<div class="doc-media"><video src="/api/doc/raw' + bust + '" controls></video></div>';
+        else if (k === "docx" || k === "pptx" || k === "xlsx") {
+          body.innerHTML = '<div class="doc-loading">Rendering ' + k + ' preview…</div>';
+          fetch("/api/doc/preview").then(function (r) { return r.json(); }).then(function (d) {
+            var f = document.createElement("iframe"); f.className = "doc-frame"; f.setAttribute("sandbox", "allow-same-origin");
+            f.srcdoc = d.html || "<p>Preview unavailable.</p>"; body.innerHTML = ""; body.appendChild(f);
+          }).catch(function () { body.innerHTML = '<div class="doc-loading">Preview failed.</div>'; });
+        } else body.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:12.5px">No preview for this file type. Try text, Markdown, PDF, an image, or Office (docx/pptx/xlsx).</div>';
+      }
+    }
   }
   function toggleDoc() { var pane = $("arenaDoc"); if (!pane) return; pane.hidden = !pane.hidden; $("arenaDocBtn") && $("arenaDocBtn").classList.toggle("on", !pane.hidden); if (!pane.hidden) loadDoc(); }
+
+  // ---------- Autonomous collaboration: models pass the pen + reach consensus ----------
+  // One focused, stateless turn against a model (the doc is injected server-side). Shows
+  // `displayText` in the card but sends `modelText`; resolves with the model's reply text.
+  function askOne(item, modelText, displayText) {
+    return new Promise(function (resolve) {
+      item.messages.push({ role: "user", content: displayText || modelText });
+      var assistant = { role: "assistant", content: "" }; item.messages.push(assistant); item.busy = true;
+      renderArenaConvo(item.id);
+      var card = arenaCardEl(item.id), fill = card && card.querySelector(".lane-fill"), meta = card && card.querySelector(".ach-meta");
+      if (meta) meta.textContent = "…";
+      var payload = { model: item.name, messages: [{ role: "user", content: modelText }], options: {} };
+      if (item.provider) payload.provider = item.provider;
+      if (state.penHolder === item.id && state.doc && state.doc.open && state.doc.editable) payload.can_edit_doc = true;
+      fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+        .then(function (res) {
+          var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
+          function pump() {
+            return reader.read().then(function (r) {
+              if (r.done) { item.busy = false; if (fill) fill.style.width = "100%"; if (meta) meta.textContent = ""; renderArenaConvo(item.id); var cv = card && card.querySelector(".arena-convo"); if (cv) renderArtifacts(cv); resolve(assistant.content); return; }
+              buf += dec.decode(r.value, { stream: true });
+              var lines = buf.split("\n"); buf = lines.pop();
+              lines.forEach(function (line) {
+                if (!line.trim()) return; var o; try { o = JSON.parse(line); } catch (e) { return; }
+                if (o.doc_event) { loadDoc(); return; }
+                if (o.error) assistant.content += "\n\n_" + o.error + "_";
+                var msg = o.message || {}; if (msg.content) { assistant.content += msg.content; renderArenaConvo(item.id); }
+              });
+              return pump();
+            });
+          }
+          return pump();
+        }).catch(function () { item.busy = false; resolve(assistant.content); });
+    });
+  }
+  function parseProposal(text) {
+    function grab(key) { var m = text.match(new RegExp(key + "\\s*:\\s*([\\s\\S]*?)(?:\\n[A-Z][A-Z ]{2,}:|$)", "i")); return m ? m[1].trim() : ""; }
+    var dRaw = grab("DECISION"), edit = grab("EDIT");
+    var hasEdit = !!edit && !/^(none|n\/a|no\b|nothing)/i.test(edit);
+    var decision = (/\bdone\b/i.test(dRaw) && !/\bedit\b/i.test(dRaw)) ? "DONE" : (hasEdit || /edit/i.test(dRaw) ? "EDIT" : "DONE");
+    return { decision: decision, volunteer: /yes/i.test(grab("VOLUNTEER")), edit: edit, reason: grab("REASON") || "(no reason given)" };
+  }
+  var _collabOn = false;
+  function autoCollaborate() {
+    if (_collabOn) return;
+    if (state.arena.length < 2) { window.showToast && window.showToast("Add at least 2 models to collaborate"); return; }
+    if (!state.doc || !state.doc.open || !state.doc.editable) { window.showToast && window.showToast("Open an editable text/Markdown document first"); return; }
+    var goal = ($("arenaPrompt").value || "").trim();
+    if (!goal) { window.showToast && window.showToast("Type the document goal in the shared prompt"); $("arenaPrompt").focus(); return; }
+    _collabOn = true; var btn = $("arenaCollab"); if (btn) { btn.classList.add("on"); btn.disabled = true; }
+    var history = [], lastHolder = null, MAX = 8;
+    function finish(msg) { _collabOn = false; if (btn) { btn.classList.remove("on"); btn.disabled = false; } setPen(state.penHolder); window.showToast && window.showToast("Collaboration finished — " + msg); }
+    function round(n) {
+      if (n > MAX) return finish("reached the round limit; document saved.");
+      var hist = history.length ? history.slice(-6).join("\n") : "(nothing yet)";
+      var prompt =
+        "You and the other AI models are collaborating to improve the shared document (shown in your context) toward this goal:\n" +
+        "GOAL: " + goal + "\n\nCollaboration so far:\n" + hist + "\n\n" +
+        "Decide whether the document needs another edit to meet the goal. Reply in EXACTLY this format and nothing else:\n" +
+        "DECISION: EDIT or DONE\nVOLUNTEER: yes or no\nEDIT: <if EDIT: the ONE specific change — quote the exact existing text to find and its replacement, or 'APPEND: <text>'>\nREASON: <one short sentence>";
+      Promise.all(state.arena.map(function (it) {
+        return askOne(it, prompt, "Round " + n + ": review the document and propose an edit (or vote it's done) toward — " + goal).then(function (t) { return { it: it, p: parseProposal(t) }; });
+      })).then(function (results) {
+        results.forEach(function (r) { history.push(r.it.name.split(":")[0] + ": " + r.p.decision + " — " + r.p.reason); });
+        var editors = results.filter(function (r) { return r.p.decision === "EDIT" && r.p.edit; });
+        if (!editors.length) return finish("the group agrees the document is done.");
+        var vols = editors.filter(function (r) { return r.p.volunteer; }); var pool = vols.length ? vols : editors;
+        var pick = pool.filter(function (r) { return r.it.id !== lastHolder; })[0] || pool[0];
+        lastHolder = pick.it.id; setPen(pick.it.id);
+        var ep = "The group chose you to hold the pen this round. Using the edit_document tool, make this single improvement to the shared document, then confirm in one short line:\n" + pick.p.edit + "\nRules: make exactly ONE surgical edit_document call; `find` must be text that exists verbatim in the document; pass only real document text to `find`/`replace` — never put labels like 'REPLACE:', 'EDIT:', 'APPEND:', or 'FIND:' into the content; preserve the rest of the document.";
+        askOne(pick.it, ep, "✒ Holds the pen — applying: " + pick.p.reason).then(function () {
+          history.push("✒ " + pick.it.name.split(":")[0] + " edited the document (" + pick.p.reason + ")");
+          loadDoc(); setTimeout(function () { round(n + 1); }, 500);
+        });
+      });
+    }
+    window.showToast && window.showToast("Models are collaborating on the document…");
+    round(1);
+  }
 
   // ---------- MCP servers (Settings → Tools): connect tools for every model ----------
   function renderMcp() {
@@ -761,6 +858,7 @@
     if ($("filesToggle")) $("filesToggle").addEventListener("click", loadFiles);
     if ($("arenaBroadcast")) $("arenaBroadcast").addEventListener("click", broadcastArena);
     if ($("arenaCross")) $("arenaCross").addEventListener("click", crossPollinate);
+    if ($("arenaCollab")) $("arenaCollab").addEventListener("click", autoCollaborate);
     if ($("arenaDocBtn")) $("arenaDocBtn").addEventListener("click", toggleDoc);
     if ($("docOpenBtn")) $("docOpenBtn").addEventListener("click", openDoc);
     if ($("docSaveBtn")) $("docSaveBtn").addEventListener("click", saveDoc);
