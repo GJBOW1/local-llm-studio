@@ -542,6 +542,24 @@
         .then(function () { window.showToast && window.showToast(m.name.split(":")[0] + " closed · unloaded from Ollama"); }).catch(function () {});
     } else { window.showToast && window.showToast("Removed " + m.name.split(":")[0]); }
   }
+  function isToolModel(name) {
+    var prov = (state.modelProvider || {})[name] || "";   // "" = local
+    // OpenAI pro/reasoning models run on the Responses API — no tool-calling, so they
+    // can't edit documents (the pen) or take part in Collaborate.
+    if (prov === "openai" && (/-pro(\b|-|$)/i.test(name) || /(^|[-/])o[1-9](-|$)/i.test(name))) return false;
+    return true;
+  }
+  function refreshCollabBtn() {
+    var btn = $("arenaCollab"); if (!btn) return;
+    var bad = state.arena.filter(function (m) { return !isToolModel(m.name); }).map(function (m) { return m.name.split(":")[0]; });
+    if (bad.length) {
+      btn.disabled = true; btn.classList.add("disabled");
+      btn.title = "Remove " + bad.join(", ") + " — reasoning model(s) can't edit documents. Collaborate needs tool-capable models only.";
+    } else {
+      btn.disabled = false; btn.classList.remove("disabled");
+      btn.title = "Let the models pass the pen and edit the open document together until they agree it's done";
+    }
+  }
   function renderArenaCards() {
     var grid = $("arenaGrid"); if (!grid) return;
     var n = state.arena.length;
@@ -552,7 +570,7 @@
       var col = colorFor(m.name);
       var c = document.createElement("div"); c.className = "arena-card glass" + (m.id === state.penHolder ? " penholder" : ""); c.style.setProperty("--mc", col); c.dataset.id = m.id;
       c.innerHTML =
-        '<div class="arena-card-head"><span class="ach-model"><span class="ac-dot" style="background:' + col + '"></span><span class="mname-t">' + m.name + '</span>' + (m.provider ? '<span class="ach-cloud">☁</span>' : '') + '</span><span class="ach-meta"></span><button class="arena-pen' + (m.id === state.penHolder ? " on" : "") + '" title="Give this model the pen — it can edit the open document">✒</button><button class="arena-close" title="' + (m.provider ? "Remove from arena" : "Close &amp; unload from Ollama") + '">✕</button></div>' +
+        '<div class="arena-card-head"><span class="ach-model"><span class="ac-dot" style="background:' + col + '"></span><span class="mname-t">' + m.name + '</span>' + (m.provider ? '<span class="ach-cloud">☁</span>' : '') + '</span><span class="ach-meta"></span><button class="arena-pen' + (m.id === state.penHolder ? " on" : "") + (isToolModel(m.name) ? "" : " noedit") + '" title="' + (isToolModel(m.name) ? "Give this model the pen — it edits the open document" : "Reasoning model — can\'t edit documents") + '">✒</button><button class="arena-close" title="' + (m.provider ? "Remove from arena" : "Close &amp; unload from Ollama") + '">✕</button></div>' +
         '<div class="lane"><div class="lane-fill" style="width:0%;background:' + col + '"></div></div>' +
         '<div class="arena-convo"></div>' +
         '<div class="arena-cinput"><textarea rows="1" placeholder="Ask ' + esc(m.name.split(":")[0]) + '…"></textarea><button class="arena-send" title="Send to this model"><svg viewBox="0 0 24 24" fill="#0a1020"><path d="M3.4 20.4 21 12 3.4 3.6 3.39 10.2 15 12l-11.61 1.8z"/></svg></button></div>';
@@ -566,6 +584,7 @@
       grid.appendChild(c);
       renderArenaConvo(m.id);
     });
+    refreshCollabBtn();
   }
   function renderArenaConvo(id) {
     var card = arenaCardEl(id), m = arenaItem(id); if (!card || !m) return;
@@ -665,7 +684,14 @@
     fetch("/api/doc/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: ta.value }) })
       .then(function (r) { return r.json(); }).then(function (d) { if (d.ok) { state.doc.content = ta.value; window.showToast && window.showToast("Document saved"); } else window.showToast && window.showToast(d.error || "Save failed"); });
   }
-  function setPen(id) { state.penHolder = (state.penHolder === id) ? null : id; renderArenaCards(); renderDoc(); }
+  function setPen(id) {
+    var m = arenaItem(id);
+    if (m && !isToolModel(m.name)) {
+      window.showToast && window.showToast(m.name.split(":")[0] + " is a reasoning model — it can't edit documents. Give the pen to a tool-capable model (gpt-5.5, Gemini, Claude, …).");
+      return;
+    }
+    state.penHolder = (state.penHolder === id) ? null : id; renderArenaCards(); renderDoc();
+  }
   function renderDoc() {
     var pane = $("arenaDoc"); if (!pane) return;
     var nameEl = $("docName"), chip = $("docPenChip"), body = $("docBodyEl");
@@ -751,6 +777,8 @@
   function autoCollaborate() {
     if (_collabOn) return;
     if (state.arena.length < 2) { window.showToast && window.showToast("Add at least 2 models to collaborate"); return; }
+    var nonTool = state.arena.filter(function (m) { return !isToolModel(m.name); }).map(function (m) { return m.name.split(":")[0]; });
+    if (nonTool.length) { window.showToast && window.showToast("Remove " + nonTool.join(", ") + " — reasoning model(s) can't edit documents. Collaborate needs tool-capable models only."); refreshCollabBtn(); return; }
     if (!state.doc || !state.doc.open) { window.showToast && window.showToast("Open a document in the previewer first (📄 Document)"); return; }
     if (!state.doc.agent_editable) {
       if (state.doc.kind === "pdf") {   // PDFs can't be edited in place → collaborate on an editable Markdown copy
