@@ -242,6 +242,60 @@
     else { send.classList.remove("stop"); send.innerHTML = '<svg viewBox="0 0 24 24" fill="#0a1020"><path d="M3.4 20.4 21 12 3.4 3.6 3.39 10.2 15 12l-11.61 1.8z"/></svg>'; }
   }
 
+  // ---------- files / agent panel ----------
+  var filesLoaded = false;
+  function fileIcon(dir) { return dir ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>'; }
+  function loadFiles() {
+    var panel = $("filesPanel"); if (!panel) return;
+    fetch("/api/project").then(function (r) { return r.json(); }).then(function (p) { var rt = panel.querySelector(".fp-root"); if (rt) rt.textContent = p.name || "project"; }).catch(function () {});
+    fetch("/api/fs/tree").then(function (r) { return r.json(); }).then(function (d) {
+      var box = panel.querySelector(".ftree-box"); if (!box) return; box.innerHTML = "";
+      (d.entries || []).slice(0, 100).forEach(function (e) {
+        var depth = e.path.split("/").length - 1;
+        var row = document.createElement("div"); row.className = "fnode" + (e.type === "file" ? " file" : "");
+        row.style.paddingLeft = (8 + depth * 14) + "px";
+        row.innerHTML = '<span class="fn-ic">' + fileIcon(e.type === "dir") + '</span><span class="fn-name"></span>';
+        row.querySelector(".fn-name").textContent = e.path.split("/").pop();
+        box.appendChild(row);
+      });
+      if (!(d.entries || []).length) box.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:6px">Empty project. Use the model with agent edits on to create files.</div>';
+    }).catch(function () {});
+    fetch("/api/agent/writes").then(function (r) { return r.json(); }).then(function (d) { var t = $("tgWrites"); if (t) t.classList.toggle("on", !!d.enabled); }).catch(function () {});
+    fetch("/api/agent/approval").then(function (r) { return r.json(); }).then(function (d) { var t = $("tgApprove"); if (t) t.classList.toggle("on", !!d.required); }).catch(function () {});
+    loadChanges();
+  }
+  function loadChanges() {
+    var panel = $("filesPanel"); if (!panel) return;
+    fetch("/api/fs/changes").then(function (r) { return r.json(); }).then(function (d) {
+      var head = panel.querySelector(".changes-head"); if (!head) return;
+      panel.querySelectorAll(".diffcard, .changes-empty").forEach(function (x) { x.remove(); });
+      var changes = (d.changes || []);
+      if (!changes.length) { var e = document.createElement("div"); e.className = "changes-empty"; e.style.cssText = "font-size:12px;color:var(--muted);padding:2px 2px 8px"; e.textContent = "No changes yet."; head.after(e); return; }
+      var verb = { create: "＋", update: "✎", mkdir: "📁＋", move: "→", delete: "🗑" };
+      var frag = document.createDocumentFragment();
+      changes.slice(0, 10).forEach(function (c) {
+        var card = document.createElement("div"); card.className = "diffcard" + (c.undone ? " resolved" : ""); card.style.marginBottom = "8px";
+        var top = document.createElement("div"); top.className = "diff-top";
+        top.innerHTML = '<span class="diff-dot"></span><span style="flex:1;overflow:hidden;text-overflow:ellipsis"></span>';
+        top.querySelector("span:last-child").textContent = (verb[c.op] || c.op) + " " + c.path + (c.to ? " → " + c.to : "");
+        card.appendChild(top);
+        var act = document.createElement("div"); act.className = "diff-act";
+        if (c.undone) act.innerHTML = '<span class="diff-jail" style="margin:0">undone</span>';
+        else { var b = document.createElement("button"); b.className = "diff-no"; b.textContent = "Undo"; b.addEventListener("click", function () { fetch("/api/fs/undo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: c.id }) }).then(function (r) { return r.json(); }).then(function (x) { window.showToast && window.showToast(x.message || "Undone"); loadFiles(); }); }); act.appendChild(b); }
+        card.appendChild(act);
+        frag.appendChild(card);
+      });
+      head.after(frag);
+    }).catch(function () {});
+  }
+  function wireAgentToggle(id, url, key) {
+    var t = $(id); if (!t) return;
+    t.addEventListener("click", function () {
+      var on = t.classList.contains("on"); var body = {}; body[key] = on;
+      fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(function (r) { return r.json(); }).then(function () { window.showToast && window.showToast(on ? "Enabled" : "Disabled"); }).catch(function () {});
+    });
+  }
+
   // ---------- init ----------
   function init() {
     var inputEl = $("input"), sendBtn = $("send");
@@ -252,6 +306,9 @@
     }
     if ($("newChat")) $("newChat").addEventListener("click", newChat);
     if ($("convoSearch")) $("convoSearch").addEventListener("input", renderConvos);
+    if ($("filesToggle")) $("filesToggle").addEventListener("click", loadFiles);
+    wireAgentToggle("tgWrites", "/api/agent/writes", "enabled");
+    wireAgentToggle("tgApprove", "/api/agent/approval", "required");
 
     state.convos = loadConvos();
     loadHealth(); setInterval(loadHealth, 8000);
