@@ -275,7 +275,7 @@
     var tt = document.querySelector(".topttl .t"); if (tt) tt.textContent = text.slice(0, 48);
     setStreaming(true);
     state.controller = new AbortController();
-    var acc = "";
+    var acc = "", _t0 = Date.now(), _tFirst = 0, _tLast = 0;
     var payload = { model: state.model, messages: state.messages, options: { temperature: parseFloat(($("tempSlider") || {}).value || "0.7") } };
     var prov = (state.modelProvider || {})[state.model];
     if (prov) payload.provider = prov; // route cloud models to their provider, not Ollama
@@ -291,12 +291,12 @@
               if (!line.trim()) return; var o; try { o = JSON.parse(line); } catch (e) { return; }
               if (o.error) { acc += "\n\n_" + o.error + "_"; }
               var msg = o.message || {};
-              if (msg.content) { acc += msg.content; body.innerHTML = renderMd(acc); transcriptEl().scrollTop = transcriptEl().scrollHeight; }
+              if (msg.content) { if (!_tFirst) _tFirst = Date.now(); _tLast = Date.now(); acc += msg.content; body.innerHTML = renderMd(acc); transcriptEl().scrollTop = transcriptEl().scrollHeight; if (_tLast > _tFirst) { var _m = $("tps"); if (_m) _m.textContent = Math.round(acc.trim().split(/\s+/).length / ((_tLast - _tFirst) / 1000)) + " w/s"; } }
             });
             return pump();
           });
         }
-        function finishStream() { body.parentElement.classList.remove("cursor"); state.messages.push({ role: "assistant", content: acc }); setStreaming(false); persist(); }
+        function finishStream() { body.parentElement.classList.remove("cursor"); state.messages.push({ role: "assistant", content: acc }); setStreaming(false); persist(); recordTps(acc.trim() ? acc.trim().split(/\s+/).length : 0, _tFirst ? Math.max(_tLast - _tFirst, 100) : 0); }
         return pump();
       }).catch(function (e) { body.parentElement.classList.remove("cursor"); if (e.name !== "AbortError") body.innerHTML = renderMd(acc + "\n\n_stream failed_"); setStreaming(false); });
   }
@@ -359,6 +359,45 @@
       var on = t.classList.contains("on"); var body = {}; body[key] = on;
       fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(function (r) { return r.json(); }).then(function () { window.showToast && window.showToast(on ? "Enabled" : "Disabled"); }).catch(function () {});
     });
+  }
+
+  // ---------- Telemetry (real data from /api/ps + measured throughput) ----------
+  state.tpsHistory = []; state.lastTps = 0;
+  function sparkPath(hist) {
+    if (!hist || hist.length < 2) return '<polyline points="0,38 200,38" fill="none" stroke="var(--glass-brd-2)" stroke-width="2"/>';
+    var h = hist.slice(-9), max = Math.max.apply(null, h), min = Math.min.apply(null, h);
+    var pts = h.map(function (v, i) { var x = h.length > 1 ? i / (h.length - 1) * 200 : 0; var y = 38 - (max > min ? (v - min) / (max - min) : 0.5) * 32; return x.toFixed(0) + "," + y.toFixed(0); }).join(" ");
+    return '<polygon points="0,40 ' + pts + ' 200,40" fill="url(#sg)"/><polyline points="' + pts + '" fill="none" stroke="var(--accent)" stroke-width="2"/>';
+  }
+  function renderTelemetry() {
+    var body = $("telemetryBody"); if (!body) return;
+    fetch("/api/ps").then(function (r) { return r.json(); }).then(function (d) {
+      var loaded = d.models || [], tps = state.lastTps || 0;
+      var html = '<div class="insp-card"><h5>Throughput</h5>' +
+        '<div class="metric-row"><span class="mlabel">Last response</span><span class="mval" style="color:var(--accent);font-size:17px">' + (tps ? tps + " w/s" : "—") + '</span></div>' +
+        '<svg class="spark" viewBox="0 0 200 40" preserveAspectRatio="none"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".35"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>' + sparkPath(state.tpsHistory) + '</svg></div>';
+      if (loaded.length) {
+        loaded.forEach(function (m) {
+          var pct = m.gpu_pct || 0, lit = Math.round(pct / 100 * 14), sq = "";
+          for (var i = 0; i < 14; i++) sq += '<span style="width:13px;height:13px;border-radius:4px;background:' + (i < lit ? "var(--accent)" : "var(--glass-brd-2)") + '"></span>';
+          html += '<div class="insp-card"><h5 style="text-transform:none;letter-spacing:0;font-family:var(--mono);font-size:12px;color:var(--text)">' + m.name + '</h5>' +
+            '<div style="display:flex;gap:4px;margin:6px 0 10px;flex-wrap:wrap">' + sq + '</div>' +
+            '<div class="metric-row"><span class="mlabel">GPU offload</span><span class="mval">' + pct + '%</span></div>' +
+            '<div class="metric-row"><span class="mlabel">VRAM</span><span class="mval">' + (m.vram_h || "—") + '</span></div>' +
+            '<div class="metric-row"><span class="mlabel">Size</span><span class="mval">' + (m.size_h || "—") + '</span></div></div>';
+        });
+      } else {
+        html += '<div class="insp-card"><h5>GPU layer offload</h5><p style="font-size:12px;color:var(--muted);line-height:1.5;margin:2px 0 0">No model is loaded in Ollama right now. Send a message to a local model and its real VRAM &amp; GPU offload appear here.</p></div>';
+      }
+      body.innerHTML = html;
+    }).catch(function () { body.innerHTML = '<div class="insp-card" style="color:var(--muted);font-size:12px">Telemetry unavailable.</div>'; });
+  }
+  function recordTps(words, ms) {
+    if (ms <= 0 || !words) return;
+    var v = Math.round(words / (ms / 1000));
+    state.lastTps = v; state.tpsHistory.push(v); if (state.tpsHistory.length > 12) state.tpsHistory.shift();
+    var meter = $("tps"); if (meter) meter.textContent = v + " w/s";
+    renderTelemetry();
   }
 
   // ---------- Arena: add models via provider dropdowns; close unloads from Ollama; broadcast races ----------
@@ -483,6 +522,8 @@
     if ($("arenaPrompt")) $("arenaPrompt").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); broadcastArena(); } });
     document.addEventListener("mousedown", function (e) { if (!e.target.closest(".arena-pill")) closeArenaPills(); });
     renderArenaCards();
+    renderTelemetry();
+    setInterval(function () { var ap = $("app"); if (document.visibilityState === "visible" && ap && ap.classList.contains("show-inspector")) renderTelemetry(); }, 5000);
     var topTitle = document.querySelector(".topttl .t");
     if (topTitle) { topTitle.title = "Double-click to rename"; topTitle.style.cursor = "text"; topTitle.addEventListener("dblclick", function () { if (state.activeId) editTitle(topTitle, state.activeId); }); }
     wireAgentToggle("tgWrites", "/api/agent/writes", "enabled");

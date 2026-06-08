@@ -168,24 +168,8 @@
       <div class="insp-tabs"><div class="insp-tab on" data-tab="telemetry">Telemetry</div><div class="insp-tab" data-tab="graph">Graph</div><div class="insp-tab" data-tab="sources">Sources</div></div>
       <div class="insp-body">
         <div class="insp-panel" data-panel="telemetry">
-        <div class="insp-card">
-          <h5>Tokens / sec</h5>
-          <div class="metric-row"><span class="mlabel">Current</span><span class="mval" style="color:var(--accent);font-size:17px">62 t/s</span></div>
-          <svg class="spark" viewBox="0 0 200 40" preserveAspectRatio="none"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".35"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs><polyline points="0,30 25,26 50,28 75,18 100,22 125,12 150,16 175,8 200,14" fill="none" stroke="var(--accent)" stroke-width="2"/><polygon points="0,30 25,26 50,28 75,18 100,22 125,12 150,16 175,8 200,14 200,40 0,40" fill="url(#sg)"/></svg>
-        </div>
-        <div class="insp-card">
-          <h5>Context budget</h5>
-          <div class="bar-row"><div class="bl"><span>gemma4:12b-it-qat</span><b>3k / 16k</b></div><div class="bar-track"><div class="bar-fill" style="width:19%"></div></div></div>
-        </div>
-        <div class="insp-card">
-          <h5>GPU layer offload</h5>
-          <div style="display:flex;gap:4px;margin:4px 0 10px">
-            <span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--accent)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--glass-brd-2)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--glass-brd-2)"></span><span style="width:14px;height:14px;border-radius:4px;background:var(--glass-brd-2)"></span>
-          </div>
-          <div class="metric-row"><span class="mlabel">Offloaded</span><span class="mval">11 / 14 layers</span></div>
-          <div class="metric-row"><span class="mlabel">VRAM</span><span class="mval">6.3 GB</span></div>
-        </div>
-        <p style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-top:4px">Live, on-device metrics — measured, never estimated.</p>
+        <div id="telemetryBody"><div class="insp-card" style="color:var(--muted);font-size:12px">Loading telemetry…</div></div>
+        <p style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-top:4px">Live, on-device metrics — measured from Ollama, never estimated.</p>
         </div>
 
         <div class="insp-panel" data-panel="graph" hidden>
