@@ -30,7 +30,7 @@ hiddenimports = (
     + collect_submodules("lxml")
     + collect_submodules("PIL")
     + ["requests", "mcp_bridge", "app", "supervisor", "ollama_runtime",
-       "mammoth", "docx", "pptx", "openpyxl", "et_xmlfile", "xlsxwriter"]
+       "mammoth", "docx", "pptx", "openpyxl", "et_xmlfile", "xlsxwriter", "pypdf"]
 )
 
 # Optional app icon (only if present, else PyInstaller errors on a missing path).

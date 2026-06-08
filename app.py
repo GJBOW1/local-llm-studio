@@ -413,11 +413,114 @@ def _doc_kind(path: str, is_text: bool) -> str:
     return "text" if is_text else "binary"
 
 
+_AGENT_EDITABLE_KINDS = ("docx", "xlsx", "pptx")  # formats the agents can edit in place
+
+
+def _extract_doc_text(path: str, kind: str) -> str:
+    """The document's text content — what models read and propose find/replace against.
+    Office formats are flattened to text; PDF text is extracted with pypdf."""
+    try:
+        if kind in ("text", "markdown"):
+            with open(path, encoding="utf-8", errors="ignore") as f:
+                return f.read()
+        if kind == "docx":
+            import docx
+            return "\n".join(p.text for p in docx.Document(path).paragraphs)
+        if kind == "xlsx":
+            import openpyxl
+            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+            out: list[str] = []
+            for ws in wb.worksheets:
+                out.append(f"## {ws.title}")
+                for row in ws.iter_rows(values_only=True):
+                    out.append("\t".join("" if v is None else str(v) for v in row))
+            wb.close()
+            return "\n".join(out)
+        if kind == "pptx":
+            from pptx import Presentation
+            out = []
+            for i, s in enumerate(Presentation(path).slides, 1):
+                out.append(f"## Slide {i}")
+                for sh in s.shapes:
+                    if sh.has_text_frame:
+                        for para in sh.text_frame.paragraphs:
+                            t = "".join(r.text for r in para.runs)
+                            if t.strip():
+                                out.append(t)
+            return "\n".join(out)
+        if kind == "pdf":
+            import pypdf
+            return "\n\n".join((pg.extract_text() or "") for pg in pypdf.PdfReader(path).pages)
+    except Exception as exc:
+        return f"(could not extract text from this {kind}: {exc})"
+    return ""
+
+
+def _edit_office(path: str, kind: str, find: str, replace: str) -> bool:
+    """Apply a surgical find/replace (or append when find is empty) to an Office file
+    in place, preserving its format. Returns True if anything changed."""
+    if kind == "docx":
+        import docx
+        d = docx.Document(path); changed = False
+        if find:
+            for p in d.paragraphs:
+                if find in p.text:
+                    new = p.text.replace(find, replace)
+                    for r in p.runs:
+                        r.text = ""
+                    (p.runs[0] if p.runs else p.add_run()).text = new
+                    changed = True
+        else:
+            d.add_paragraph(replace); changed = True
+        if changed:
+            d.save(path)
+        return changed
+    if kind == "xlsx":
+        import openpyxl
+        wb = openpyxl.load_workbook(path); changed = False
+        if find:
+            for ws in wb.worksheets:
+                for row in ws.iter_rows():
+                    for c in row:
+                        if isinstance(c.value, str) and find in c.value:
+                            c.value = c.value.replace(find, replace); changed = True
+        else:
+            wb.active.append([replace]); changed = True
+        if changed:
+            wb.save(path)
+        wb.close()
+        return changed
+    if kind == "pptx":
+        from pptx import Presentation
+        prs = Presentation(path); changed = False
+        if find:
+            for s in prs.slides:
+                for sh in s.shapes:
+                    if not sh.has_text_frame:
+                        continue
+                    for para in sh.text_frame.paragraphs:
+                        txt = "".join(r.text for r in para.runs)
+                        if find in txt:
+                            for r in para.runs:
+                                r.text = ""
+                            if para.runs:
+                                para.runs[0].text = txt.replace(find, replace)
+                            changed = True
+        elif prs.slides:
+            tf = next((sh.text_frame for sh in prs.slides[-1].shapes if sh.has_text_frame), None)
+            if tf is not None:
+                tf.add_paragraph().text = replace; changed = True
+        if changed:
+            prs.save(path)
+        return changed
+    return False
+
+
 def _open_doc_path(raw: str) -> Response:
-    """Open ANY file the user picked into the live viewer. Text files are read and
-    become editable (the pen); binary files (image/pdf/video/…) are served raw for
-    preview and are not text-editable. The user chooses the file explicitly (native
-    picker), so any readable file is allowed."""
+    """Open ANY file the user picked into the live viewer. Text/Markdown become directly
+    editable; Office files (docx/xlsx/pptx) are rendered for preview AND are agent-editable
+    (the pen edits them in place); PDF/image/video are preview-only. The user picks the
+    file explicitly, so any readable file is allowed."""
     if not raw:
         return jsonify({"ok": False, "error": "No file selected."}), 400
     path = os.path.realpath(os.path.expanduser(raw))
@@ -431,11 +534,15 @@ def _open_doc_path(raw: str) -> Response:
     except (UnicodeDecodeError, OSError):
         is_text = False
     kind = _doc_kind(path, is_text)
-    OPEN_DOC.update({"path": path, "content": content if is_text else "", "kind": kind, "editable": is_text})
+    # Office + PDF get their text extracted (so models can read + edit it); office is
+    # agent-editable in place, PDF is read-only here (Collaborate converts it to Markdown).
+    text_content = content if is_text else (_extract_doc_text(path, kind) if kind in (*_AGENT_EDITABLE_KINDS, "pdf") else "")
+    agent_editable = is_text or kind in _AGENT_EDITABLE_KINDS
+    OPEN_DOC.update({"path": path, "content": text_content, "kind": kind, "editable": is_text, "agent_editable": agent_editable})
     return jsonify({
         "ok": True, "path": path, "name": os.path.basename(path),
-        "content": content if is_text else "", "kind": kind,
-        "editable": is_text, "size": os.path.getsize(path),
+        "content": text_content, "kind": kind,
+        "editable": is_text, "agent_editable": agent_editable, "size": os.path.getsize(path),
     })
 
 
@@ -458,10 +565,21 @@ EDIT_DOCUMENT_SCHEMA: dict[str, Any] = {
 
 
 def _apply_doc_edit(find: str, replace: str) -> str:
-    """Apply a find/replace (or append) to the open doc. Scoped to OPEN_DOC only."""
+    """Apply a find/replace (or append) to the open doc. Scoped to OPEN_DOC only.
+    Text/Markdown edit the file directly; Office files edit in place via _edit_office."""
     path = OPEN_DOC["path"]
     if not path:
         return "No document is open."
+    kind = OPEN_DOC.get("kind", "")
+    if kind in _AGENT_EDITABLE_KINDS:
+        try:
+            changed = _edit_office(path, kind, find, replace)
+        except Exception as exc:
+            return f"Could not edit the {kind}: {exc}"
+        if not changed:
+            return "The `find` text was not found in the document; no change made." if find else "Nothing to append."
+        OPEN_DOC["content"] = _extract_doc_text(path, kind)
+        return "Document updated."
     try:
         with open(path, encoding="utf-8") as f:
             content = f.read()
@@ -2374,7 +2492,7 @@ def chat() -> Response:
     # The pen: only the selected pane's request carries can_edit_doc, so only that
     # model is handed the edit tool. Cloud models hold the pen too — their tool loops
     # run edit_document the same way the local loop does.
-    if data.get("can_edit_doc") and OPEN_DOC["path"] and OPEN_DOC.get("editable"):
+    if data.get("can_edit_doc") and OPEN_DOC["path"] and OPEN_DOC.get("agent_editable"):
         tools = tools + [EDIT_DOCUMENT_SCHEMA, SAVE_DOCUMENT_SCHEMA]
 
     body: dict[str, Any] = {
@@ -2481,6 +2599,7 @@ def api_doc() -> Response:
         "content": OPEN_DOC["content"],
         "kind": OPEN_DOC.get("kind", ""),
         "editable": OPEN_DOC.get("editable", False),
+        "agent_editable": OPEN_DOC.get("agent_editable", False),
     })
 
 
@@ -2489,6 +2608,26 @@ def api_doc_open() -> Response:
     """Open a file (any type) by path into the shared live viewer."""
     data: dict[str, Any] = request.get_json(silent=True) or {}
     return _open_doc_path(str(data.get("path", "")))
+
+
+@app.post("/api/doc/to_editable")
+def api_doc_to_editable() -> Response:
+    """Convert the open PDF (which can't be edited in place) into an editable Markdown
+    working copy alongside it, and open that for collaboration. The PDF stays as-is."""
+    path = OPEN_DOC["path"]
+    kind = OPEN_DOC.get("kind", "")
+    if not path:
+        return jsonify({"ok": False, "error": "No document is open."}), 400
+    if kind != "pdf":
+        return jsonify({"ok": True, "path": path, "unchanged": True})  # already editable
+    text = _extract_doc_text(path, "pdf")
+    md_path = os.path.splitext(path)[0] + " (editable).md"
+    try:
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write("# " + os.path.basename(os.path.splitext(path)[0]) + "\n\n" + text)
+    except OSError as exc:
+        return jsonify({"ok": False, "error": f"Could not create the editable copy: {exc}"}), 400
+    return _open_doc_path(md_path)
 
 
 @app.post("/api/doc/browse")

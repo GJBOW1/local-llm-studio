@@ -594,7 +594,7 @@
     function setRate() { if (meta && tLast > tFirst) { var w = assistant.content.trim() ? assistant.content.trim().split(/\s+/).length : 0; meta.textContent = Math.round(w / ((tLast - tFirst) / 1000)) + " w/s"; } }
     var payload = { model: m.name, messages: payloadMsgs, options: {} };
     if (m.provider) payload.provider = m.provider;
-    if (state.penHolder === id && state.doc && state.doc.open && state.doc.editable) payload.can_edit_doc = true;
+    if (state.penHolder === id && state.doc && state.doc.open && state.doc.agent_editable) payload.can_edit_doc = true;
     fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
       .then(function (res) {
         var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
@@ -679,7 +679,7 @@
     nameEl.textContent = state.doc.name;
     chip.hidden = false;
     if (holder) { var c = colorFor(holder.name); pane.classList.add("held"); pane.style.setProperty("--pen", c); chip.style.setProperty("--pen", c); chip.textContent = "✒ " + holder.name.split(":")[0] + " holds the pen"; }
-    else { pane.classList.remove("held"); pane.style.removeProperty("--pen"); chip.style.removeProperty("--pen"); chip.textContent = "read-only · ✒ a card to assign the pen"; }
+    else { pane.classList.remove("held"); pane.style.removeProperty("--pen"); chip.style.removeProperty("--pen"); chip.textContent = state.doc.agent_editable ? "✒ give a card the pen, or hit Collaborate" : "preview only"; }
     if ($("docSaveBtn")) $("docSaveBtn").style.display = state.doc.editable ? "" : "none";
     if (state.doc.editable) {
       body.dataset.pkey = "";
@@ -688,8 +688,8 @@
       if (document.activeElement !== ta) ta.value = state.doc.content || "";
     } else {
       body.classList.remove("editing");
-      var k = state.doc.kind || "", key = (state.doc.name || "") + "|" + k;
-      if (body.dataset.pkey !== key) {       // only (re)build when the file/kind changes
+      var k = state.doc.kind || "", key = (state.doc.name || "") + "|" + k + "|" + ((state.doc.content || "").length);
+      if (body.dataset.pkey !== key) {       // (re)build when the file/kind OR content changes (so Office previews refresh after edits)
         body.dataset.pkey = key; var bust = "?t=" + Date.now();
         if (k === "pdf") body.innerHTML = '<iframe class="doc-frame" src="/api/doc/raw' + bust + '"></iframe>';
         else if (k === "image") body.innerHTML = '<div class="doc-media"><img src="/api/doc/raw' + bust + '" alt=""></div>';
@@ -718,7 +718,7 @@
       if (meta) meta.textContent = "…";
       var payload = { model: item.name, messages: [{ role: "user", content: modelText }], options: {} };
       if (item.provider) payload.provider = item.provider;
-      if (state.penHolder === item.id && state.doc && state.doc.open && state.doc.editable) payload.can_edit_doc = true;
+      if (state.penHolder === item.id && state.doc && state.doc.open && state.doc.agent_editable) payload.can_edit_doc = true;
       fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
         .then(function (res) {
           var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
@@ -751,7 +751,19 @@
   function autoCollaborate() {
     if (_collabOn) return;
     if (state.arena.length < 2) { window.showToast && window.showToast("Add at least 2 models to collaborate"); return; }
-    if (!state.doc || !state.doc.open || !state.doc.editable) { window.showToast && window.showToast("Open an editable text/Markdown document first"); return; }
+    if (!state.doc || !state.doc.open) { window.showToast && window.showToast("Open a document in the previewer first (📄 Document)"); return; }
+    if (!state.doc.agent_editable) {
+      if (state.doc.kind === "pdf") {   // PDFs can't be edited in place → collaborate on an editable Markdown copy
+        window.showToast && window.showToast("PDFs can't be edited in place — making an editable copy to collaborate on…");
+        fetch("/api/doc/to_editable", { method: "POST" }).then(function (r) { return r.json(); }).then(function (d) {
+          if (d.ok && !d.unchanged) { state.doc = { open: true, name: d.name, content: d.content, editable: d.editable, agent_editable: d.agent_editable, kind: d.kind }; renderDoc(); autoCollaborate(); }
+          else window.showToast && window.showToast(d.error || "Couldn't convert the PDF");
+        }).catch(function () { window.showToast && window.showToast("Couldn't convert the PDF"); });
+        return;
+      }
+      window.showToast && window.showToast("This file type can't be edited. Use text, Markdown, docx, xlsx, pptx, or a PDF.");
+      return;
+    }
     var goal = ($("arenaPrompt").value || "").trim();
     if (!goal) { window.showToast && window.showToast("Type the document goal in the shared prompt"); $("arenaPrompt").focus(); return; }
     _collabOn = true; var btn = $("arenaCollab"); if (btn) { btn.classList.add("on"); btn.disabled = true; }
