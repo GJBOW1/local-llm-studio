@@ -648,6 +648,18 @@
       else if (d.error) window.showToast && window.showToast(d.error);
     }).catch(function () { btn.disabled = false; btn.innerHTML = old; });
   }
+  function newDoc() {
+    var btn = $("docNewBtn"); if (!btn) return; var old = btn.innerHTML; btn.disabled = true; btn.textContent = "…";
+    fetch("/api/doc/new", { method: "POST" }).then(function (r) { return r.json(); }).then(function (d) {
+      btn.disabled = false; btn.innerHTML = old;
+      if (d.ok) {
+        state.doc = { open: true, name: d.name, content: d.content, editable: d.editable, kind: d.kind };
+        var pane = $("arenaDoc"); if (pane && pane.hidden) { pane.hidden = false; $("arenaDocBtn") && $("arenaDocBtn").classList.add("on"); }
+        renderDoc(); var ta = document.querySelector("#docBodyEl textarea"); if (ta) ta.focus();
+        window.showToast && window.showToast("Created " + d.name);
+      } else if (d.error) window.showToast && window.showToast(d.error);
+    }).catch(function () { btn.disabled = false; btn.innerHTML = old; });
+  }
   function saveDoc() {
     var ta = document.querySelector("#docBodyEl textarea"); if (!ta || !state.doc) return;
     fetch("/api/doc/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: ta.value }) })
@@ -860,6 +872,7 @@
     if ($("arenaCross")) $("arenaCross").addEventListener("click", crossPollinate);
     if ($("arenaCollab")) $("arenaCollab").addEventListener("click", autoCollaborate);
     if ($("arenaDocBtn")) $("arenaDocBtn").addEventListener("click", toggleDoc);
+    if ($("docNewBtn")) $("docNewBtn").addEventListener("click", newDoc);
     if ($("docOpenBtn")) $("docOpenBtn").addEventListener("click", openDoc);
     if ($("docSaveBtn")) $("docSaveBtn").addEventListener("click", saveDoc);
     if ($("sbConnect")) $("sbConnect").addEventListener("click", connectVault);

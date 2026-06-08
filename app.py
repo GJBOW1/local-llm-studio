@@ -2507,6 +2507,47 @@ def api_doc_browse() -> Response:
     return _open_doc_path(proc.stdout.strip())
 
 
+@app.post("/api/doc/new")
+def api_doc_new() -> Response:
+    """Pop the native macOS Save dialog so the user chooses a location + filename, create
+    a fresh document there, and open it in the viewer ready to edit. The extension picks
+    the type: text/Markdown (default) become editable; .docx/.xlsx/.pptx are created as
+    valid blank Office files (preview)."""
+    try:
+        proc = subprocess.run(
+            ["osascript", "-e", 'POSIX path of (choose file name with prompt "Create a new document" default name "untitled.md")'],
+            capture_output=True, text=True, timeout=300,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        return jsonify({"ok": False, "error": f"Save dialog unavailable: {exc}"})
+    if proc.returncode != 0:  # user pressed Cancel
+        return jsonify({"ok": False, "cancelled": True})
+    raw = proc.stdout.strip()
+    if not raw:
+        return jsonify({"ok": False, "cancelled": True})
+    path = os.path.realpath(os.path.expanduser(raw))
+    ext = os.path.splitext(path)[1].lower()
+    if not ext:
+        path += ".md"
+        ext = ".md"
+    try:
+        if ext == ".docx":
+            import docx
+            docx.Document().save(path)
+        elif ext == ".xlsx":
+            import openpyxl
+            openpyxl.Workbook().save(path)
+        elif ext == ".pptx":
+            from pptx import Presentation
+            Presentation().save(path)
+        else:  # text / markdown / anything else → empty editable text file
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("")
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"Could not create the document: {exc}"}), 400
+    return _open_doc_path(path)
+
+
 @app.get("/api/doc/raw")
 def api_doc_raw() -> Response:
     """Serve the open document's bytes (for previewing images/PDF/video inline)."""
