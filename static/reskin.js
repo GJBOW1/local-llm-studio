@@ -613,7 +613,7 @@
     function setRate() { if (meta && tLast > tFirst) { var w = assistant.content.trim() ? assistant.content.trim().split(/\s+/).length : 0; meta.textContent = Math.round(w / ((tLast - tFirst) / 1000)) + " w/s"; } }
     var payload = { model: m.name, messages: payloadMsgs, options: {} };
     if (m.provider) payload.provider = m.provider;
-    if (state.penHolder === id && state.doc && state.doc.open && state.doc.agent_editable) payload.can_edit_doc = true;
+    if (state.doc && state.doc.open && state.doc.agent_editable && (state.penHolder === id || (state.collabAll && isToolModel(m.name)))) payload.can_edit_doc = true;
     fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
       .then(function (res) {
         var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
@@ -663,7 +663,7 @@
     var btn = $("docOpenBtn"); if (!btn) return; var old = btn.innerHTML; btn.disabled = true; btn.textContent = "…";
     fetch("/api/doc/browse", { method: "POST" }).then(function (r) { return r.json(); }).then(function (d) {
       btn.disabled = false; btn.innerHTML = old;
-      if (d.ok) { state.doc = { open: true, name: d.name, content: d.content, editable: d.editable, kind: d.kind }; renderDoc(); window.showToast && window.showToast("Opened " + d.name); }
+      if (d.ok) { state.doc = { open: true, name: d.name, content: d.content, editable: d.editable, agent_editable: d.agent_editable, kind: d.kind }; renderDoc(); window.showToast && window.showToast("Opened " + d.name); }
       else if (d.error) window.showToast && window.showToast(d.error);
     }).catch(function () { btn.disabled = false; btn.innerHTML = old; });
   }
@@ -672,7 +672,7 @@
     fetch("/api/doc/new", { method: "POST" }).then(function (r) { return r.json(); }).then(function (d) {
       btn.disabled = false; btn.innerHTML = old;
       if (d.ok) {
-        state.doc = { open: true, name: d.name, content: d.content, editable: d.editable, kind: d.kind };
+        state.doc = { open: true, name: d.name, content: d.content, editable: d.editable, agent_editable: d.agent_editable, kind: d.kind };
         var pane = $("arenaDoc"); if (pane && pane.hidden) { pane.hidden = false; $("arenaDocBtn") && $("arenaDocBtn").classList.add("on"); }
         renderDoc(); var ta = document.querySelector("#docBodyEl textarea"); if (ta) ta.focus();
         window.showToast && window.showToast("Created " + d.name);
@@ -794,41 +794,19 @@
     }
     var goal = ($("arenaPrompt").value || "").trim();
     if (!goal) { window.showToast && window.showToast("Type the document goal in the shared prompt"); $("arenaPrompt").focus(); return; }
-    _collabOn = true; var btn = $("arenaCollab"); if (btn) { btn.classList.add("on"); btn.disabled = true; }
-    var history = [], lastHolder = null, MAX = 8;
-    function finish(msg) { _collabOn = false; if (btn) { btn.classList.remove("on"); btn.disabled = false; } setPen(state.penHolder); window.showToast && window.showToast("Collaboration finished — " + msg); }
-    function round(n) {
-      if (n > MAX) return finish("reached the round limit; document saved.");
-      var hist = history.length ? "What the group has done so far:\n" + history.slice(-6).join("\n") + "\n\n" : "";
-      var prompt =
-        "The user gave you and the other AI models THIS instruction for the open document:\n\n" +
-        "  ▶ USER'S INSTRUCTION: " + goal + "\n\n" +
-        "Your job is to carry out the user's instruction by collaboratively editing the document (its current text is shown in your context). " + hist +
-        "Look at the current document. If another edit is still needed to fully satisfy the user's instruction, propose ONE specific edit; if it's already fully satisfied, say done.\n\n" +
-        "Reply in exactly this format and nothing else:\n" +
-        "NEXT: edit   (or)   NEXT: done\n" +
-        "CHANGE: (only when NEXT is edit) the single edit — the exact existing text to find and what to replace it with, or \"APPEND: <new text>\"\n" +
-        "WHY: one sentence on how this advances the user's instruction";
-      var label = 'Round ' + n + ' · carrying out your instruction: "' + goal + '"';
-      Promise.all(state.arena.map(function (it) {
-        return askOne(it, prompt, label).then(function (t) { return { it: it, p: parseProposal(t) }; });
-      })).then(function (results) {
-        results.forEach(function (r) { history.push(r.it.name.split(":")[0] + ": " + r.p.decision + " — " + r.p.reason); });
-        var editors = results.filter(function (r) { return r.p.decision === "EDIT" && r.p.edit; });
-        if (!editors.length) return finish("the group agrees your instruction is fully done.");
-        var pick = editors.filter(function (r) { return r.it.id !== lastHolder; })[0] || editors[0];   // rotate the pen
-        lastHolder = pick.it.id; setPen(pick.it.id);
-        var ep =
-          'You hold the pen. Make this ONE edit with the edit_document tool to advance the user\'s instruction ("' + goal + '"), then confirm in one short line:\n\n' + pick.p.edit +
-          "\n\nRules: exactly ONE edit_document call; `find` must be text that exists verbatim in the document; put only real document text into `find`/`replace` — never labels like 'CHANGE:', 'APPEND:', or 'FIND:'; preserve everything else.";
-        askOne(pick.it, ep, "✒ " + pick.it.name.split(":")[0] + " takes the pen — editing toward your instruction").then(function () {
-          history.push("✒ " + pick.it.name.split(":")[0] + " edited: " + pick.p.reason);
-          loadDoc(); setTimeout(function () { round(n + 1); }, 500);
-        });
-      });
-    }
-    window.showToast && window.showToast("Models are collaborating on the document…");
-    round(1);
+    // Collaborate = Broadcast, but each model is told to work together to edit the open
+    // document and is handed the edit_document tool (the pen, for everyone, this turn).
+    var preamble =
+      "You're collaborating with the other AI models on the document open in the viewer — its current text is shown in your context.\n" +
+      "Work WITH them to carry out the user's request below by editing the document directly with the edit_document tool. " +
+      "Make surgical edits, build on changes the others have already made, and don't undo good work. " +
+      "If the request is already fully satisfied, say so instead of editing.\n\n" +
+      "USER'S REQUEST: " + goal;
+    state.collabAll = true;
+    state.arena.forEach(function (m) { m.messages.push({ role: "user", content: preamble }); streamArena(m.id); });
+    state.collabAll = false;
+    if ($("arenaPrompt")) $("arenaPrompt").value = "";
+    window.showToast && window.showToast("Collaborating on " + state.doc.name + "…");
   }
 
   // ---------- MCP servers (Settings → Tools): connect tools for every model ----------
