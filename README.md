@@ -1,12 +1,12 @@
 <div align="center">
 
-# Local LLM Studio
+# Parley
 
-### A private, multi‑model AI workspace that runs on your own machine.
+### Put several AI models in one room — race them on a prompt, then watch them critique each other and collaborate on a single document until they reach consensus.
 
-Race local and cloud models side‑by‑side, ground every answer in your own notes, and let several models collaborate on one document — all behind a glassy, offline‑first interface where nothing leaves your computer unless you say so.
+Add the models you trust — Claude, GPT, Gemini, Grok, or local models through [Ollama](https://ollama.com/) — and put them to work *together*: **race** them on the same prompt, **cross‑pollinate** their answers, then hand them a document and let them **critique each other and co‑write it**, passing a single pen by consensus. A glassy workspace where many minds reach one answer — and nothing leaves your computer unless you say so.
 
-![Local LLM Studio](docs/banners/banner.png)
+![Parley — several AI models race and collaborate on one document](docs/brand/parley-banner.png)
 
 [![Made with Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask&logoColor=white)](https://flask.palletsprojects.com/)

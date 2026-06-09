@@ -114,10 +114,8 @@ button { font-family: inherit; }
   overflow: hidden;
 }
 .app.collapsed .side { width: 0; padding-left: 0; padding-right: 0; opacity: 0; transform: translateX(-12px); border: none; }
-.side-brand { display: flex; align-items: center; gap: 11px; padding: 4px 4px 2px; }
-.brandmark { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex-shrink: 0;
-  background: linear-gradient(145deg, var(--accent), var(--accent-2)); box-shadow: 0 6px 16px -4px rgba(111,143,207,.6), inset 0 1px 0 rgba(255,255,255,.4); }
-.brandmark svg { width: 19px; height: 19px; }
+.side-brand { display: flex; align-items: center; gap: 10px; padding: 4px 4px 2px; }
+.brandlogo { height: 46px; width: auto; flex-shrink: 0; filter: drop-shadow(0 3px 8px rgba(0,0,0,.18)); }
 .side-brand .bt { font-weight: 600; font-size: 15.5px; letter-spacing: -0.2px; line-height: 1; }
 .side-brand .bt small { display: block; font-size: 9px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--muted); margin-top: 3px; font-weight: 500; }
 
