@@ -36,3 +36,6 @@ vendor_bin/
 *.dmg
 cert.p12
 mcp_servers.json
+
+# The full 35MB NotebookLM video stays local; the brief cut is committed.
+docs/demo/local-llm-studio-notebooklm.mp4
