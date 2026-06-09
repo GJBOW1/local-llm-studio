@@ -593,3 +593,9 @@ button { font-family: inherit; }
 .doc-userpen:hover { color: var(--text); border-color: var(--accent); }
 .doc-userpen.on { color: #0a1020; background: var(--accent); border-color: var(--accent); }
 .docpane.userheld { box-shadow: 0 0 0 1px var(--accent), inset 0 1px 0 var(--glass-hi); }
+
+/* Document writing-style selector — agents write to the chosen style when they hold the pen */
+.docpane-stylebar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--glass-brd-2); }
+.docpane-stylebar .dsb-label { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.doc-style { flex: 1 1 auto; min-width: 0; background: var(--glass-2); border: 1px solid var(--glass-brd-2); color: var(--text); border-radius: 8px; padding: 5px 8px; font-size: 12px; font-family: var(--sans); cursor: pointer; }
+.doc-style:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--soft); }

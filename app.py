@@ -389,7 +389,7 @@ DRAFT_IMESSAGE_SCHEMA: dict[str, Any] = {
 # Single source of truth, server-side. All models READ it (injected into context);
 # only the pen-holder's chat request carries can_edit_doc=true, so only that model
 # is handed the edit_document tool. The pen is the frontend's selected pane.
-OPEN_DOC: dict[str, Any] = {"path": "", "content": "", "kind": "", "editable": False}
+OPEN_DOC: dict[str, Any] = {"path": "", "content": "", "kind": "", "editable": False, "style": ""}
 _MD_EXTS = (".md", ".markdown")
 _IMG_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".ico")
 _VID_EXTS = (".mp4", ".webm", ".mov", ".m4v", ".ogg")
@@ -2548,9 +2548,13 @@ def chat() -> Response:
     # Inject the open shared document so every model can READ it (only the
     # pen-holder gets the edit tool, below).
     if OPEN_DOC["path"]:
+        style_note = (
+            "\nWHEN YOU EDIT THIS DOCUMENT, write in this style: " + OPEN_DOC["style"]
+            + " Keep the whole document consistent in that style.\n"
+        ) if OPEN_DOC.get("style") else ""
         system_extra += (
             "\n\n# Shared document (live viewer)\nThe user has this document open. You "
-            "can read and reference it. Only edit it if you have the edit_document tool.\n\n"
+            "can read and reference it. Only edit it if you have the edit_document tool." + style_note + "\n\n"
             "--- " + os.path.basename(OPEN_DOC["path"]) + " ---\n" + OPEN_DOC["content"][:8000]
         )
     if messages and isinstance(messages[0], dict) and messages[0].get("role") == "system":
@@ -2686,7 +2690,18 @@ def api_doc() -> Response:
         "kind": OPEN_DOC.get("kind", ""),
         "editable": OPEN_DOC.get("editable", False),
         "agent_editable": OPEN_DOC.get("agent_editable", False),
+        "style": OPEN_DOC.get("style", ""),
     })
+
+
+@app.post("/api/doc/style")
+def api_doc_style() -> Response:
+    """Set the writing style the agents should use when they edit the open document.
+    `style` is a plain-language description (e.g. 'formal and professional …') injected
+    into every editing model's context; empty clears it."""
+    data: dict[str, Any] = request.get_json(silent=True) or {}
+    OPEN_DOC["style"] = str(data.get("style", "")).strip()
+    return jsonify({"ok": True, "style": OPEN_DOC["style"]})
 
 
 @app.post("/api/doc/open")

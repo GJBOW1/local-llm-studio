@@ -674,7 +674,7 @@
     var btn = $("docOpenBtn"); if (!btn) return; var old = btn.innerHTML; btn.disabled = true; btn.textContent = "…";
     fetch("/api/doc/browse", { method: "POST" }).then(function (r) { return r.json(); }).then(function (d) {
       btn.disabled = false; btn.innerHTML = old;
-      if (d.ok) { state.doc = { open: true, name: d.name, content: d.content, editable: d.editable, agent_editable: d.agent_editable, kind: d.kind }; renderDoc(); window.showToast && window.showToast("Opened " + d.name); }
+      if (d.ok) { state.doc = { open: true, name: d.name, content: d.content, editable: d.editable, agent_editable: d.agent_editable, style: d.style, kind: d.kind }; renderDoc(); window.showToast && window.showToast("Opened " + d.name); }
       else if (d.error) window.showToast && window.showToast(d.error);
     }).catch(function () { btn.disabled = false; btn.innerHTML = old; });
   }
@@ -683,7 +683,7 @@
     fetch("/api/doc/new", { method: "POST" }).then(function (r) { return r.json(); }).then(function (d) {
       btn.disabled = false; btn.innerHTML = old;
       if (d.ok) {
-        state.doc = { open: true, name: d.name, content: d.content, editable: d.editable, agent_editable: d.agent_editable, kind: d.kind };
+        state.doc = { open: true, name: d.name, content: d.content, editable: d.editable, agent_editable: d.agent_editable, style: d.style, kind: d.kind };
         var pane = $("arenaDoc"); if (pane && pane.hidden) { pane.hidden = false; $("arenaDocBtn") && $("arenaDocBtn").classList.add("on"); }
         renderDoc(); var ta = document.querySelector("#docBodyEl textarea"); if (ta) ta.focus();
         window.showToast && window.showToast("Created " + d.name);
@@ -708,6 +708,28 @@
     }
     state.penHolder = (state.penHolder === id) ? null : id; renderArenaCards(); renderDoc();
   }
+  var DOC_STYLES = [
+    ["Default (no specific style)", ""],
+    ["Formal / Professional", "formal and professional — full sentences, no contractions, an objective and polished tone, clear structure."],
+    ["Plain & Concise", "plain and concise — short sentences, simple everyday words, minimal jargon, easy to skim."],
+    ["Academic", "academic — precise, formal, third-person, carefully qualified claims, rigorous structure."],
+    ["Narrative prose", "flowing narrative prose — connected paragraphs instead of bullet lists, smooth and engaging."],
+    ["Casual / Conversational", "casual and conversational — warm and approachable, contractions welcome, like explaining to a friendly colleague."],
+    ["Technical / Precise", "technical and precise — accurate terminology, unambiguous wording, structure suited to an engineering audience."],
+    ["Persuasive / Marketing", "persuasive and benefit-driven — punchy, compelling, focused on value and outcomes for the reader."],
+    ["Executive summary", "executive-summary style — terse, high-level, bottom-line-up-front, no filler."],
+    ["Storytelling", "storytelling — vivid and concrete, with a clear arc and human detail that keeps the reader hooked."]
+  ];
+  function populateStyles() {
+    var sel = $("docStyle"); if (!sel || sel.options.length) return;
+    DOC_STYLES.forEach(function (s) { var o = document.createElement("option"); o.value = s[1]; o.textContent = s[0]; sel.appendChild(o); });
+    sel.addEventListener("change", function () {
+      var v = sel.value, name = sel.options[sel.selectedIndex].text;
+      if (state.doc) state.doc.style = v;
+      fetch("/api/doc/style", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ style: v }) }).catch(function () {});
+      window.showToast && window.showToast(v ? "Agents will write in “" + name + "”" : "Writing style cleared");
+    });
+  }
   function renderDoc() {
     var pane = $("arenaDoc"); if (!pane) return;
     var nameEl = $("docName"), chip = $("docPenChip"), body = $("docBodyEl");
@@ -715,6 +737,7 @@
     if (!state.doc || !state.doc.open) {
       nameEl.textContent = "No document"; chip.hidden = true; pane.classList.remove("held", "userheld"); pane.style.removeProperty("--pen");
       if ($("docUserPen")) $("docUserPen").hidden = true;
+      if ($("docStyleBar")) $("docStyleBar").hidden = true;
       body.classList.remove("editing");
       body.innerHTML = '<div class="arena-out-idle" style="padding:20px">Open a Markdown/text file. Every racing model can read it; give one model the pen (✒ on its card) and it edits the doc when it answers.</div>';
       return;
@@ -727,6 +750,12 @@
     else if (holder) { var c = colorFor(holder.name); pane.classList.add("held"); pane.style.setProperty("--pen", c); chip.style.setProperty("--pen", c); chip.textContent = "✒ " + holder.name.split(":")[0]; chip.hidden = false; }
     else { pane.classList.remove("held"); pane.style.removeProperty("--pen"); chip.style.removeProperty("--pen"); chip.textContent = state.doc.agent_editable ? "agents can edit" : "preview"; chip.hidden = false; }
     if ($("docSaveBtn")) $("docSaveBtn").style.display = state.doc.editable ? "" : "none";
+    var sb = $("docStyleBar");
+    if (sb) {
+      var showStyle = !!(state.doc.editable || state.doc.agent_editable);
+      sb.hidden = !showStyle;
+      if (showStyle) { populateStyles(); var stysel = $("docStyle"); if (stysel) stysel.value = state.doc.style || ""; }
+    }
     if (state.doc.editable) {
       body.dataset.pkey = "";
       if (!body.querySelector("textarea")) { body.classList.add("editing"); body.innerHTML = '<textarea spellcheck="false"></textarea>'; }
@@ -823,7 +852,7 @@
       if (state.doc.kind === "pdf") {   // PDFs can't be edited in place → collaborate on an editable Markdown copy
         window.showToast && window.showToast("PDFs can't be edited in place — making an editable copy to collaborate on…");
         fetch("/api/doc/to_editable", { method: "POST" }).then(function (r) { return r.json(); }).then(function (d) {
-          if (d.ok && !d.unchanged) { state.doc = { open: true, name: d.name, content: d.content, editable: d.editable, agent_editable: d.agent_editable, kind: d.kind }; renderDoc(); autoCollaborate(); }
+          if (d.ok && !d.unchanged) { state.doc = { open: true, name: d.name, content: d.content, editable: d.editable, agent_editable: d.agent_editable, style: d.style, kind: d.kind }; renderDoc(); autoCollaborate(); }
           else window.showToast && window.showToast(d.error || "Couldn't convert the PDF");
         }).catch(function () { window.showToast && window.showToast("Couldn't convert the PDF"); });
         return;
