@@ -16,7 +16,7 @@ Add the models you trust — Claude, GPT, Gemini, Grok, or local models through 
 
 ### 🎬 Watch the demo
 
-<a href="https://github.com/Panic-In-The-Distro/local-llm-studio/raw/main/docs/demo/local-llm-studio-notebooklm-brief.mp4"><img src="docs/demo/video-poster.png" alt="Watch the narrated demo" width="720"></a>
+<a href="https://github.com/Panic-In-The-Distro/parley/raw/main/docs/demo/local-llm-studio-notebooklm-brief.mp4"><img src="docs/demo/video-poster.png" alt="Watch the narrated demo" width="720"></a>
 
 <sub>▶️ A 1:42 narrated overview (click to play) · or the [quick screenshot tour](docs/demo/local-llm-studio-demo.mp4)</sub>
 
@@ -67,8 +67,8 @@ Bring keys for any cloud provider, connect MCP servers whose tools reach every m
 > Requires [Ollama](https://ollama.com/) running locally and Python 3.11.
 
 ```bash
-git clone https://github.com/Panic-In-The-Distro/local-llm-studio.git
-cd local-llm-studio
+git clone https://github.com/Panic-In-The-Distro/parley.git
+cd parley
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
