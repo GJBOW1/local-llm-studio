@@ -26,7 +26,7 @@ Add the models you trust — Claude, GPT, Gemini, Grok, or local models through 
 
 ## Why it exists
 
-Most AI apps send your conversations — and your context — to someone else's server. Local LLM Studio flips that: it runs models **on your hardware** through [Ollama](https://ollama.com/), keeps your chats and notes on disk, and only touches the cloud when *you* connect a key. It's a single, polished interface for everything from a quick offline chat to a multi‑model "boardroom" working on the same document.
+Most AI apps send your conversations — and your context — to someone else's server. Parley flips that: it runs models **on your hardware** through [Ollama](https://ollama.com/), keeps your chats and notes on disk, and only touches the cloud when *you* connect a key. It's a single, polished interface for everything from a quick offline chat to a multi‑model "boardroom" working on the same document.
 
 ## ✨ Highlights
 
@@ -50,7 +50,7 @@ Give one model the **pen** and broadcast a prompt — it edits the open document
 
 ## 🧠 A second brain that actually connects
 
-Connect your Obsidian vault in Settings and Local LLM Studio indexes it locally with `nomic-embed-text`. Relevant notes are pulled into every answer automatically, and the **knowledge graph** shows the web of links between them — the real structure of how you think.
+Connect your Obsidian vault in Settings and Parley indexes it locally with `nomic-embed-text`. Relevant notes are pulled into every answer automatically, and the **knowledge graph** shows the web of links between them — the real structure of how you think.
 
 ![Knowledge graph of the connected vault, with index health](docs/screenshots/03-knowledge-graph.png)
 
