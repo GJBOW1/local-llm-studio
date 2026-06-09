@@ -15,6 +15,9 @@
   function colorFor(name) { var h = 0; for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0; return MODEL_COLORS[h % MODEL_COLORS.length]; }
 
   var state = { model: "", models: [], cloud: {}, convos: [], activeId: null, messages: [], streaming: false, controller: null };
+  // The signature "pen": a felt marker with a red ink tip (echoes the marker the
+  // models pass in the brand art). currentColor tints the barrel; the nib stays red.
+  var PEN_SVG = '<svg class="pen-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/><path d="M3.5 16.5 2 22l5.5-1.5z" fill="#d8503a" stroke="none"/></svg>';
   var LS_MODEL = "lls.model.v2", LS_CONVOS = "lls.conversations";
 
   // ---------- markdown (minimal, safe) ----------
@@ -570,7 +573,7 @@
       var col = colorFor(m.name);
       var c = document.createElement("div"); c.className = "arena-card glass" + (m.id === state.penHolder ? " penholder" : ""); c.style.setProperty("--mc", col); c.dataset.id = m.id;
       c.innerHTML =
-        '<div class="arena-card-head"><span class="ach-model"><span class="ac-dot" style="background:' + col + '"></span><span class="mname-t">' + m.name + '</span>' + (m.provider ? '<span class="ach-cloud">☁</span>' : '') + '</span><span class="ach-meta"></span><button class="arena-pen' + (m.id === state.penHolder ? " on" : "") + (isToolModel(m.name) ? "" : " noedit") + '" title="' + (isToolModel(m.name) ? "Give this model the pen — it edits the open document" : "Reasoning model — can\'t edit documents") + '">✒</button><button class="arena-close" title="' + (m.provider ? "Remove from arena" : "Close &amp; unload from Ollama") + '">✕</button></div>' +
+        '<div class="arena-card-head"><span class="ach-model"><span class="ac-dot" style="background:' + col + '"></span><span class="mname-t">' + m.name + '</span>' + (m.provider ? '<span class="ach-cloud">☁</span>' : '') + '</span><span class="ach-meta"></span><button class="arena-pen' + (m.id === state.penHolder ? " on" : "") + (isToolModel(m.name) ? "" : " noedit") + '" title="' + (isToolModel(m.name) ? "Give this model the pen — it edits the open document" : "Reasoning model — can\'t edit documents") + '">' + PEN_SVG + '</button><button class="arena-close" title="' + (m.provider ? "Remove from arena" : "Close &amp; unload from Ollama") + '">✕</button></div>' +
         '<div class="lane"><div class="lane-fill" style="width:0%;background:' + col + '"></div></div>' +
         '<div class="arena-convo"></div>' +
         '<div class="arena-cinput"><textarea rows="1" placeholder="Ask ' + esc(m.name.split(":")[0]) + '…"></textarea><button class="arena-send" title="Send to this model"><svg viewBox="0 0 24 24" fill="#0a1020"><path d="M3.4 20.4 21 12 3.4 3.6 3.39 10.2 15 12l-11.61 1.8z"/></svg></button></div>';
@@ -747,7 +750,7 @@
     if (up) { up.hidden = false; up.classList.toggle("on", !!state.userPen); var lbl = up.querySelector(".dup-label"); if (lbl) lbl.textContent = state.userPen ? "You hold it" : "Take pen"; up.title = state.userPen ? "You hold the pen — agents can't edit. Click to hand it back to the models." : "Take the pen yourself — the AI agents can't edit while you hold it."; }
     pane.classList.toggle("userheld", !!state.userPen);
     if (state.userPen) { pane.classList.remove("held"); pane.style.removeProperty("--pen"); chip.hidden = true; }
-    else if (holder) { var c = colorFor(holder.name); pane.classList.add("held"); pane.style.setProperty("--pen", c); chip.style.setProperty("--pen", c); chip.textContent = "✒ " + holder.name.split(":")[0]; chip.hidden = false; }
+    else if (holder) { var c = colorFor(holder.name); pane.classList.add("held"); pane.style.setProperty("--pen", c); chip.style.setProperty("--pen", c); chip.innerHTML = PEN_SVG; chip.appendChild(document.createTextNode(" " + holder.name.split(":")[0])); chip.hidden = false; }
     else { pane.classList.remove("held"); pane.style.removeProperty("--pen"); chip.style.removeProperty("--pen"); chip.textContent = state.doc.agent_editable ? "agents can edit" : "preview"; chip.hidden = false; }
     if ($("docSaveBtn")) $("docSaveBtn").style.display = state.doc.editable ? "" : "none";
     var sb = $("docStyleBar");

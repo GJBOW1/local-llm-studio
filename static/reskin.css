@@ -586,6 +586,9 @@ button { font-family: inherit; }
 /* Collaborate disabled when a non-tool (reasoning) model is in the arena; pen greyed on its card */
 .crossbtn:disabled, .crossbtn.disabled { opacity: .4; cursor: not-allowed; }
 .arena-pen.noedit { opacity: .35; }
+.arena-pen .pen-svg { width: 15px; height: 15px; display: block; transition: transform .18s; }
+.arena-pen:hover .pen-svg { transform: rotate(-10deg) translateY(-1px); }
+.arena-pen.on .pen-svg { transform: rotate(-10deg); }
 
 /* User pen — the user takes the pen above the document; agents are locked out while held */
 .doc-userpen { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 5px 10px; border-radius: 9px; border: 1px solid var(--glass-brd-2); background: var(--glass-2); color: var(--muted); cursor: pointer; font-size: 11.5px; font-weight: 600; transition: color .18s, background .18s, border-color .18s; }
