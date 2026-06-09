@@ -838,7 +838,7 @@
     var next = grab("NEXT"), change = grab("CHANGE");
     var hasChange = !!change && !/^(none|n\/a|no\b|nothing)/i.test(change);
     var decision = (/\bdone\b/i.test(next) && !/\bedit\b/i.test(next)) ? "DONE" : (hasChange || /edit/i.test(next) ? "EDIT" : "DONE");
-    return { decision: decision, edit: change, reason: grab("WHY") || "(no reason given)" };
+    return { decision: decision, edit: change, reason: grab("WHY") || "(no reason given)", reasoning: grab("REASONING") };
   }
   var _collabOn = false, _steering = [];
   function autoCollaborate() {
@@ -870,40 +870,95 @@
     _collabOn = true; _steering = []; var btn = $("arenaCollab"); if (btn) btn.classList.add("on");
     setCastLabel("Steer");   // Broadcast → Steer while collaborating
     window.showToast && window.showToast("Collaborating — type into the prompt and hit Steer anytime to add guidance.");
-    var history = [], lastHolder = null, MAX = 8;
+    var history = [], lastHolder = null, MAX = 8, skepticUsed = false;
     function finish(msg) { _collabOn = false; if (btn) btn.classList.remove("on"); setCastLabel("Broadcast"); window.showToast && window.showToast("Collaboration finished — " + msg); }
-    function round(n) {
-      if (n > MAX) return finish("reached the round limit.");
-      state.penHolder = null;   // nobody holds the pen while the group proposes + votes
+    function ctx() {
       var hist = history.length ? "What the group has done so far:\n" + history.slice(-6).join("\n") + "\n\n" : "";
       var steer = _steering.length ? "  ▶ THE USER HAS STEERED THE TASK — keep going, but factor in this added guidance / change of direction: " + _steering.join("  |  ") + "\n\n" : "";
-      // PHASE 1 — every model proposes its single best next edit (or votes the task done).
+      return { hist: hist, steer: steer };
+    }
+    function askProposals(prompt, label) {
+      return Promise.all(state.arena.map(function (it) {
+        return askOne(it, prompt, label).then(function (t) { return { it: it, p: parseProposal(t) }; });
+      }));
+    }
+    function round(n) {
+      if (n > MAX) return finish("reached the round limit.");
+      state.penHolder = null;   // nobody holds the pen while the group proposes, critiques + votes
+      var c = ctx();
+      // PHASE 1 — every model proposes its single best next edit WITH its reasoning, or votes done.
       var proposePrompt =
-        "You and the other AI models are collaborating on the document open in the viewer (its current text is in your context). This round, PROPOSE your single best next edit toward the user's request — don't edit yet; the group will then vote on whose proposal is best.\n\n" +
-        "  ▶ USER'S REQUEST: " + goal + "\n\n" + steer + hist +
+        "You and the other AI models are collaborating on the document open in the viewer (its current text is in your context). This round, PROPOSE your single best next edit toward the user's request — don't edit yet; the group will critique the proposals and then vote on which is best.\n\n" +
+        "  ▶ USER'S REQUEST: " + goal + "\n\n" + c.steer + c.hist +
         "If another edit is still needed, propose ONE specific edit; if the request is already fully satisfied, vote done.\n\n" +
         "Reply in EXACTLY this format and nothing else:\n" +
         "NEXT: edit   (or)   NEXT: done\n" +
         "CHANGE: (only when NEXT is edit) the single edit — the exact existing text to find and what to replace it with, or \"APPEND: <new text>\"\n" +
-        "WHY: one sentence making the case that your edit is the best next step";
+        "WHY: one sentence making the case that your edit is the best next step\n" +
+        "REASONING: 2-3 sentences sharing your thinking — what you're trying to achieve and why this is the right move now (the other models will read this)";
+      askProposals(proposePrompt, 'Round ' + n + ' · propose your best edit for: "' + goal + '"').then(function (results) { handleResults(results, n); });
+    }
+    function handleResults(results, n) {
+      var editors = results.filter(function (r) { return r.p.decision === "EDIT" && r.p.edit; });
+      if (!editors.length) {
+        // PHASE 5 — devil's-advocate done-check: before finishing, one skeptic pass hunts for gaps.
+        if (!skepticUsed) {
+          skepticUsed = true;
+          var c = ctx();
+          var skepticPrompt =
+            "The group is about to declare the document DONE for the user's request:\n  ▶ " + goal + "\n\n" + c.steer + c.hist +
+            "Before we finish, be a tough critic. Re-read the current document and look hard for anything still MISSING, weak, vague, inconsistent, or not fully satisfying the request. If you find a genuine gap, propose ONE edit to fix it; only confirm done if the document truly and completely satisfies the request.\n\n" +
+            "Reply in EXACTLY this format and nothing else:\n" +
+            "NEXT: edit   (or)   NEXT: done\n" +
+            "CHANGE: (only when NEXT is edit) the single edit — exact text to find and what to replace it with, or \"APPEND: <new text>\"\n" +
+            "WHY: one sentence\n" +
+            "REASONING: what gap you found, or why it is genuinely complete";
+          window.showToast && window.showToast("All voted done — running a skeptic pass to check for gaps…");
+          askProposals(skepticPrompt, "Final check · anything missing before we finish?").then(function (skResults) {
+            var skEditors = skResults.filter(function (r) { return r.p.decision === "EDIT" && r.p.edit; });
+            if (!skEditors.length) {
+              skResults.forEach(function (r) { history.push(r.it.name.split(":")[0] + ": confirmed done"); });
+              return finish("the group confirmed done and a skeptic pass found no gaps.");
+            }
+            history.push("Skeptic pass surfaced " + skEditors.length + " gap(s) — continuing.");
+            proceed(skEditors, n);
+          });
+          return;
+        }
+        results.forEach(function (r) { history.push(r.it.name.split(":")[0] + ": done"); });
+        return finish("all models voted the request is done.");
+      }
+      skepticUsed = false;   // real editing work is happening — re-arm the skeptic for the next 'done'
+      proceed(editors, n);
+    }
+    function proceed(editors, n) {
+      if (editors.length === 1) {   // only one proposal — no critique/vote needed
+        history.push(editors[0].it.name.split(":")[0] + " was the only proposer");
+        return doEdit(editors[0], [], n, editors, "");
+      }
+      var slate = editors.map(function (e, i) { return "[" + (i + 1) + "] " + e.it.name.split(":")[0] + " proposes: " + e.p.edit + "\n     why: " + e.p.reason + (e.p.reasoning ? "\n     reasoning: " + e.p.reasoning : ""); }).join("\n");
+      // PHASE 1.5 — CRITIQUE: share the proposals + reasoning; each model flags the others' weaknesses.
+      var critiquePrompt =
+        "The group is collaborating on the open document toward the user's request:\n  ▶ " + goal + "\n\n" +
+        "Here are this round's proposals with each model's reasoning:\n" + slate + "\n\n" +
+        "Critique the OTHER proposals (never your own). For any you think are weak or risky, name its single biggest flaw — be specific and brief. This sharpens the vote that follows.\n\n" +
+        "Reply in EXACTLY this format and nothing else:\n" +
+        "CRITIQUE: one line per proposal you want to flag, each as '[number] — the biggest weakness'; write 'none' if every other proposal looks solid";
       Promise.all(state.arena.map(function (it) {
-        return askOne(it, proposePrompt, 'Round ' + n + ' · propose your best edit for: "' + goal + '"').then(function (t) { return { it: it, p: parseProposal(t) }; });
-      })).then(function (results) {
-        var editors = results.filter(function (r) { return r.p.decision === "EDIT" && r.p.edit; });
-        if (!editors.length) {
-          results.forEach(function (r) { history.push(r.it.name.split(":")[0] + ": done"); });
-          return finish("all models voted the request is done.");
-        }
-        if (editors.length === 1) {   // only one proposal — no vote needed
-          history.push(editors[0].it.name.split(":")[0] + " was the only proposer");
-          return doEdit(editors[0], [], n);
-        }
-        // PHASE 2 — share every proposal; each model votes the best + recommends an improvement.
-        var slate = editors.map(function (e, i) { return "[" + (i + 1) + "] " + e.it.name.split(":")[0] + " proposes: " + e.p.edit + "   (why: " + e.p.reason + ")"; }).join("\n");
+        return askOne(it, critiquePrompt, "Round " + n + " · critique the proposals").then(function (t) {
+          var m = t.match(/CRITIQUE\s*:\s*([\s\S]*?)\s*$/i); return { it: it, body: m ? m[1].trim() : "" };
+        });
+      })).then(function (crits) {
+        var critiqueLines = crits.filter(function (cc) { return cc.body && !/^\s*none\b/i.test(cc.body); })
+                                 .map(function (cc) { return cc.it.name.split(":")[0] + " flags — " + cc.body.replace(/\s+/g, " "); });
+        var critiqueBlock = critiqueLines.length ? critiqueLines.join("\n") : "";
+        if (critiqueBlock) history.push("Critiques: " + critiqueLines.length + " flagged");
+        // PHASE 2 — VOTE: pick the best proposal (informed by the critiques) + recommend an improvement.
         var votePrompt =
           "The group is collaborating on the open document toward the user's request:\n  ▶ " + goal + "\n\n" +
-          "Here are this round's proposed edits:\n" + slate + "\n\n" +
-          "Judge which proposal BEST advances the request — vote for the strongest one even if it isn't your own. Then give ONE concrete recommendation to make that proposal even better.\n\n" +
+          "This round's proposed edits:\n" + slate + "\n\n" +
+          (critiqueBlock ? "Critiques the group raised:\n" + critiqueBlock + "\n\n" : "") +
+          "Weighing the critiques, judge which proposal BEST advances the request — vote for the strongest even if it isn't your own. Then give ONE concrete recommendation to make it even better.\n\n" +
           "Reply in EXACTLY this format:\n" +
           "BEST: <the number of the best proposal>\n" +
           "RECOMMENDATION: <one concrete improvement to that proposal, or 'none'>";
@@ -916,7 +971,7 @@
           var tally = editors.map(function () { return 0; });
           ballots.forEach(function (b) { if (b.best >= 0 && b.best < editors.length) tally[b.best]++; });
           var max = Math.max.apply(null, tally), tied = [];
-          tally.forEach(function (c, i) { if (c === max) tied.push(i); });
+          tally.forEach(function (cc, i) { if (cc === max) tied.push(i); });
           var widx = tied.filter(function (i) { return editors[i].it.id !== lastHolder; })[0];   // rotate on ties
           if (widx === undefined) widx = tied[0];
           var winner = editors[widx];
@@ -924,22 +979,27 @@
           var recs = ballots.filter(function (b) { return b.it.id !== winner.it.id && b.rec && !/^\s*none\b/i.test(b.rec); })
                             .map(function (b) { return b.it.name.split(":")[0] + ": " + b.rec; });
           history.push("Vote (" + editors.map(function (e, i) { return e.it.name.split(":")[0] + " " + tally[i]; }).join(", ") + ") → " + winner.it.name.split(":")[0] + " wins the pen");
-          doEdit(winner, recs, n);
+          doEdit(winner, recs, n, editors, critiqueBlock);
         });
       });
     }
-    function doEdit(winner, recs, n) {
+    function doEdit(winner, recs, n, editors, critiqueBlock) {
+      skepticUsed = false;   // an edit is happening — re-arm the gap-check for the next 'done'
       lastHolder = winner.it.id; setPen(winner.it.id);   // the peer-chosen winner gets the edit tool
-      var recBlock = recs.length ? "\n\nThe other models judged your proposal best and offered these improvements — fold in any that genuinely strengthen it:\n- " + recs.join("\n- ") : "";
+      var others = editors.filter(function (e) { return e.it.id !== winner.it.id; })
+                          .map(function (e) { return "- " + e.it.name.split(":")[0] + ": " + e.p.edit; });
+      var synthBlock = others.length ? "\n\nThe other proposals this round — fold in the strongest elements of any that genuinely improve the result:\n" + others.join("\n") : "";
+      var recBlock = recs.length ? "\n\nImprovements the group recommended:\n- " + recs.join("\n- ") : "";
+      var critBlock = critiqueBlock ? "\n\nWeaknesses the group flagged — make sure your edit avoids them:\n" + critiqueBlock : "";
       var ep =
-        'The group voted your proposal the best, so you hold the pen this round. Make the edit with the edit_document tool to advance the user\'s request ("' + goal + '"), then confirm in one short line:\n\nYour proposal: ' + winner.p.edit + recBlock +
-        "\n\nRules: exactly ONE edit_document call; `find` must be text that exists verbatim in the document; put only real document text into `find`/`replace` — never labels like 'CHANGE:', 'BEST:', 'RECOMMENDATION:'; preserve everything else.";
-      askOne(winner.it, ep, "✒ " + winner.it.name.split(":")[0] + " won the vote — editing" + (recs.length ? " (folding in the group's tips)" : "")).then(function () {
+        'The group voted your proposal the best, so you hold the pen this round. SYNTHESIZE the single strongest edit: start from your proposal, merge in the best elements of the other proposals, apply the recommendations, and avoid the flagged weaknesses. Then make the edit with the edit_document tool to advance the user\'s request ("' + goal + '") and confirm in one short line.\n\nYour proposal: ' + winner.p.edit + synthBlock + recBlock + critBlock +
+        "\n\nRules: exactly ONE edit_document call; `find` must be text that exists verbatim in the document; put only real document text into `find`/`replace` — never labels like 'CHANGE:', 'BEST:', 'RECOMMENDATION:', 'CRITIQUE:'; preserve everything else.";
+      askOne(winner.it, ep, "✒ " + winner.it.name.split(":")[0] + " won the vote — synthesizing the edit" + (recs.length || others.length ? " (merging the group's best)" : "")).then(function () {
         history.push("✒ " + winner.it.name.split(":")[0] + " edited: " + winner.p.reason);
         loadDoc(); setTimeout(function () { round(n + 1); }, 500);
       });
     }
-    window.showToast && window.showToast("Models are collaborating on " + state.doc.name + " — taking turns…");
+    window.showToast && window.showToast("Models are collaborating on " + state.doc.name + " — propose → critique → vote → synthesize…");
     round(1);
   }
 
